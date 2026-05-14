@@ -154,7 +154,7 @@ data Peer ps pr st f m a where
            f st
         -- associated local state to the source protocol state 'st'
         --
-        -- TODO: input-output-hk/typed-protocols#57
+        -- TODO: intersectmbo/typed-protocols#57
         -> Message ps st st'
         -> ( Peer ps pr st' f m a
            , f st'
@@ -164,9 +164,9 @@ data Peer ps pr st f m a where
          --
          -- NOTE: the API is limited to pure transition of local state e.g.
          -- `f st -> Message ps st st' -> f st'`,
-         -- see https://github.com/input-output-hk/typed-protocols/discussions/63
+         -- see https://github.com/intersectmbo/typed-protocols/discussions/63
          --
-         -- TODO: input-output-hk/typed-protocols#57
+         -- TODO: intersectmbo/typed-protocols#57
        )
     -- ^ continuation
     -> Peer ps pr st f m a

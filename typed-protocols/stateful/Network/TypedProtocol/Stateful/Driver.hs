@@ -41,11 +41,11 @@ data Driver ps (pr :: PeerRole) bytes failure dstate f m =
                         -- local state should not be sent to the remote side.
                         -- However it provide extra context for the encoder.
                         --
-                        -- TODO: input-output-hk/typed-protocols#57
+                        -- TODO: intersectmbo/typed-protocols#57
                         -> Message ps st st'
                         -- message to send
                         --
-                        -- TODO: input-output-hk/typed-protocols#57
+                        -- TODO: intersectmbo/typed-protocols#57
                         -> m ()
 
         , -- | Receive a message, a blocking action which reads from the network
@@ -61,12 +61,12 @@ data Driver ps (pr :: PeerRole) bytes failure dstate f m =
                         -- local state which provides extra context for the
                         -- decoder.
                         --
-                        -- TODO: input-output-hk/typed-protocols#57
+                        -- TODO: intersectmbo/typed-protocols#57
                         -> dstate
                         -- decoder state, e.g. bytes left from decoding of
                         -- a previous message.
                         --
-                        -- TODO: input-output-hk/typed-protocols#57
+                        -- TODO: intersectmbo/typed-protocols#57
                         -> m (SomeMessage st, dstate)
 
         , -- | Initial decoder state.

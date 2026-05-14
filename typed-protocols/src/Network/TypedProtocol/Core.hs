@@ -272,7 +272,7 @@ data RelativeAgency where
     TheyHaveAgency  :: RelativeAgency
     -- evidence of protocol termination
     NobodyHasAgency :: RelativeAgency
--- TODO: input-output-hk/typed-protocols#57
+-- TODO: intersectmbo/typed-protocols#57
 
 
 -- | Compute effective agency with respect to the peer role, for client role,
