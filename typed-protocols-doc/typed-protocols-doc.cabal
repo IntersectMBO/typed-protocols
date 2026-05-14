@@ -13,6 +13,12 @@ category:           Network
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
                     NOTICE
+bug-reports:         https://github.com/intersectmbo/typed-protocols/issues
+
+source-repository head
+  type:     git
+  location: https://github.com/intersectmbo/typed-protocols
+  subdir:   typed-protocols-docs
 
 common warnings
     ghc-options: -Wall

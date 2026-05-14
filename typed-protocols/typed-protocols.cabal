@@ -14,6 +14,12 @@ build-type:          Simple
 tested-with:         GHC == {9.6, 9.8, 9.10, 9.12, 9.14}
 extra-doc-files:     CHANGELOG.md
                      README.md
+bug-reports:         https://github.com/intersectmbo/typed-protocols/issues
+
+source-repository head
+  type:     git
+  location: https://github.com/intersectmbo/typed-protocols
+  subdir:   typed-protocols
 
 -- Minimal GHC setup, additional extensions are enabled per package (e.g.
 -- pervasive type level extensions in the code base like `GADTs` or
