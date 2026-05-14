@@ -9,7 +9,7 @@ Packages`][CHaP] (`ChaP`) index).
 Currently the package is published to [`CHaP`][CHaP].  In future it will be
 published to `Hackage`.  If you want to pull it from [`CHaP`][CHaP], this is
 relatively easy to setup; for example, checkout the
-[`cabal.project`](https://github.com/input-output-hk/typed-protocols/blob/master/cabal.project)
+[`cabal.project`](https://github.com/intersectmbo/typed-protocols/blob/master/cabal.project)
 file.  Alternatively, you can relay on `source-repository-package` stanza in
 a `cabal.project` file.
 
@@ -25,7 +25,7 @@ cabal run typed-protocols-examples:test
 # Code Style
 
 Please follow local style.  For a more detailed style guide see
-[link](https://github.com/input-output-hk/ouroboros-network/blob/master/docs/StyleGuide.md).
+[link](https://github.com/intersectmbo/ouroboros-network/blob/master/docs/StyleGuide.md).
 
 # Pull Requests
 
@@ -48,6 +48,6 @@ If your pull requests resolves an existing issue, please link your PR to that
 issue, see [GitHub documentation][gh-link-issue].
 
 
-[CHaP]: https://github.com/input-output-hk/cardano-haskell-packages/
+[CHaP]: https://github.com/intersectmbo/cardano-haskell-packages/
 [gh-link-issue]: https://docs.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue
 [gh-signing-commits]: https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits
