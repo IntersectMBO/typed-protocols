@@ -58,7 +58,7 @@ data Codec ps failure (f :: ps -> Type) m bytes = Codec {
               -- local state, which contain extra context for the encoding
               -- process.
               --
-              -- TODO: input-output-hk/typed-protocols#57
+              -- TODO: intersectmbo/typed-protocols#57
               -> Message ps st st'
               -- message to be encoded
               -> bytes,
@@ -70,7 +70,7 @@ data Codec ps failure (f :: ps -> Type) m bytes = Codec {
               -- local state, which can contain extra context from the
               -- previous message.
               --
-              -- TODO: input-output-hk/typed-protocols#57
+              -- TODO: intersectmbo/typed-protocols#57
               -> m (DecodeStep bytes failure m (SomeMessage st))
      }
 

@@ -88,6 +88,6 @@ data FileAPI result where
 
   WriteFile :: FilePath -> String -> FileAPI ()
   -- write to a file
--- TODO: input-output-hk/typed-protocols#57
+-- TODO: intersectmbo/typed-protocols#57
 
 type FileRPC = ReqResp FileAPI

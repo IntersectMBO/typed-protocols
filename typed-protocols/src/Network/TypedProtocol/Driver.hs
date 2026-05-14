@@ -93,7 +93,7 @@ data Driver ps (pr :: PeerRole) dstate m =
         , -- | Initial state of the driver
           initialDState :: dstate
         }
--- TODO: input-output-hk/typed-protocols#57
+-- TODO: intersectmbo/typed-protocols#57
 
 
 -- | When decoding a 'Message' we only know the expected \"from\" state. We
