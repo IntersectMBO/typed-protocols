@@ -1,5 +1,13 @@
 # Revision history for typed-protocols
 
+## next version
+
+### Breaking changes
+
+### Non-breaking changes
+
+* Repository moved to https://github.com/IntersectMBO/typed-protocols
+
 ## 1.2.1.0 -- 2026-04-16
 
 * Support GHC-9.14, io-classes >=1.8 && < 1.11
