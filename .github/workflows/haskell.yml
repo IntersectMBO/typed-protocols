@@ -36,7 +36,7 @@ jobs:
         ghc-version: ${{ matrix.ghc }}
         cabal-version: ${{ env.CABAL_VERSION }}
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - name: "Configure cabal.project.local"
       run: |
@@ -129,7 +129,7 @@ jobs:
         which stylish-haskell
         stylish-haskell --version
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - name: "Run `stylish-haskell`"
       run: |
