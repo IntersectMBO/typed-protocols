@@ -81,7 +81,7 @@ import Network.TypedProtocol.Core as Core
 --
 type Peer :: forall ps
           -> PeerRole
-          -> IsPipelined
+          -> IsPipelined ps
           -> ps
           -> (Type -> Type)
           -- ^ monad's kind
@@ -219,6 +219,9 @@ data Peer ps pr pl st m a where
     -> Peer        ps pr (Pipelined (S n) c) st m a
 
   -- | 'AntiPipelined' analog of 'YieldPipelined'
+  --
+  -- Always uses the 'Sender' that was provided to the driver
+  -- alongside this 'Peer'.
   YieldAntiPipelined
     :: forall ps pr (st :: ps) n (st' :: ps) m a.
        ( StateTokenI st
@@ -226,22 +229,20 @@ data Peer ps pr pl st m a where
        , ActiveState st
        )
     => !(WeHaveAgencyProof pr st)
-    -> Sender ps pr st st' m
-       -- ^ how to send
-    -> Peer ps pr (AntiPipelined (S n)) st' m a
+    -> Peer ps pr (AntiPipelined st st' (S n)) st' m a
        -- ^ continuation, before or after sending
-    -> Peer ps pr (AntiPipelined    n ) st  m a
+    -> Peer ps pr (AntiPipelined st st'  n ) st  m a
 
   AntiCollect
-    :: forall ps pr n st m a.
+    :: forall ps pr n st apst apst' m a.
        StateTokenI st
-    =>        Peer ps pr (AntiPipelined    n ) st m a
+    =>        Peer ps pr (AntiPipelined apst apst'   n ) st m a
        -- ^ how to proceed if the @n+1@fst 'Sender' has already terminated
-    -> Maybe (Peer ps pr (AntiPipelined (S n)) st m a)
+    -> Maybe (Peer ps pr (AntiPipelined apst apst' (S n)) st m a)
        -- ^ 'Just' if and only if the peer can proceed before the @n+1@st 'Sender' has terminated
        --
        -- This is ignored if a message has already been sent
-    -> Peer ps pr (AntiPipelined (S n)) st m a
+    -> Peer ps pr (AntiPipelined apst apst' (S n)) st m a
 
 deriving instance Functor m => Functor (Peer ps pr pl st m)
 
@@ -324,7 +325,9 @@ data PeerPipelined ps pr (st :: ps) m a where
 deriving instance Functor m => Functor (PeerPipelined ps pr st m)
 
 data PeerAntiPipelined ps pr (st :: ps) m a where
-    PeerAntiPipelined :: { runPeerAntiPipelined :: Peer ps pr (AntiPipelined Z) st m a }
-                  -> PeerAntiPipelined ps pr st m a
+    PeerAntiPipelined ::
+      Sender ps pr apst apst' m ->
+      Peer ps pr (AntiPipelined apst apst' Z) st m a ->
+      PeerAntiPipelined ps pr st m a
 
 deriving instance Functor m => Functor (PeerAntiPipelined ps pr st m)

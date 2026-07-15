@@ -492,17 +492,17 @@ data N = Z | S N
 -- | Promoted data type which indicates if 'Peer' is used in
 -- pipelined mode or not.
 --
-data IsPipelined where
+data IsPipelined ps where
     -- | Pipelined peer which is using `c :: Type` for collecting responses
     -- from a pipelined messages. 'N' indicates depth of pipelining.
-    Pipelined    :: N -> Type -> IsPipelined
+    Pipelined     :: N -> Type -> IsPipelined ps
 
     -- | Non-pipelined peer.
-    NonPipelined :: IsPipelined
+    NonPipelined  :: IsPipelined ps
 
-    -- | Pipelined peer for a /server/ that only ever receives one
-    -- possible request.
-    AntiPipelined    :: N -> IsPipelined
+    -- | Pipelined peer for a /server/ that only ever uses one
+    -- 'Network.TypedProtocol.Peer.Sender'
+    AntiPipelined :: ps -> ps -> N -> IsPipelined ps
 
 -- | Type level count of the number of outstanding pipelined yields for which
 -- we have not yet collected a receiver result. Used to
@@ -511,17 +511,17 @@ data IsPipelined where
 -- and to ensure that the non-pipelined primitives 'Yield', 'Await' and 'Done'
 -- are only used when there are none unsatisfied pipelined requests.
 --
-type        Outstanding :: IsPipelined -> N
+type        Outstanding :: IsPipelined ps -> N
 type family Outstanding pl where
-  Outstanding 'NonPipelined      = Z
-  Outstanding ('Pipelined n _)   = n
-  Outstanding ('AntiPipelined _) = Z
+  Outstanding 'NonPipelined          = Z
+  Outstanding ('Pipelined n _)       = n
+  Outstanding ('AntiPipelined _ _ _) = Z
 
-type        AntiOutstanding :: IsPipelined -> N
+type        AntiOutstanding :: IsPipelined ps -> N
 type family AntiOutstanding pl where
-  AntiOutstanding 'NonPipelined      = Z
-  AntiOutstanding ('Pipelined _ _)   = Z
-  AntiOutstanding ('AntiPipelined n) = n
+  AntiOutstanding 'NonPipelined          = Z
+  AntiOutstanding ('Pipelined _ _)       = Z
+  AntiOutstanding ('AntiPipelined _ _ n) = n
 
 -- | A value level inductive natural number, indexed by the corresponding type
 -- level natural number 'N'.

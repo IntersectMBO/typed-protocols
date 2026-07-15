@@ -1,5 +1,6 @@
-{-# LANGUAGE CPP          #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP                 #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies        #-}
 
 -- | Actions for running 'Peer's with a 'Driver'
 --
@@ -374,12 +375,6 @@ runPipelinedPeerReceiver Driver{recvMessage} = go
 -- Running anti-pipelined peers
 --
 
--- | An existential wrapper for a queued 'Sender', so that the sender thread's
--- queue can hold senders regardless of their (from\/to) state indices.
---
-data SomeSender ps pr m where
-     SomeSender :: Sender ps pr st stdone m -> SomeSender ps pr m
-
 -- | Run an anti-pipelined peer with the given driver.
 --
 -- Dual to 'runPipelinedPeerWithDriver': where a pipelined peer sends ahead and
@@ -402,12 +397,12 @@ runAntiPipelinedPeerWithDriver
   => Driver ps pr dstate m
   -> PeerAntiPipelined ps pr st m a
   -> m (a, dstate)
-runAntiPipelinedPeerWithDriver driver@Driver{initialDState} (PeerAntiPipelined peer) = do
-    sendQueue <- atomically newTQueue
-    doneVar   <- newTVarIO 0
-    r@(a, _dstate) <- runAntiPipelinedPeerSenderQueue sendQueue doneVar driver
+runAntiPipelinedPeerWithDriver driver@Driver{initialDState} (PeerAntiPipelined sender peer) = do
+    sendVar <- newTVarIO 0
+    doneVar <- newTVarIO 0
+    r@(a, _dstate) <- runAntiPipelinedPeerSender sender sendVar doneVar driver
            `withAsyncLoop`
-         runAntiPipelinedPeerMain       sendQueue doneVar driver peer initialDState
+         runAntiPipelinedPeerMain       sendVar doneVar driver peer initialDState
 
     _ <- evaluate (force a)
     return r
@@ -423,17 +418,17 @@ runAntiPipelinedPeerWithDriver driver@Driver{initialDState} (PeerAntiPipelined p
 
 
 runAntiPipelinedPeerMain
-  :: forall ps (st :: ps) pr dstate m a.
+  :: forall ps (apst :: ps) (apst' :: ps) (st :: ps) pr dstate m a.
      ( MonadSTM    m
      , MonadThread m
      )
-  => TQueue m (SomeSender ps pr m)
+  => TVar m Natural
   -> TVar m Natural
   -> Driver ps pr dstate m
-  -> Peer ps pr ('AntiPipelined Z) st m a
+  -> Peer ps pr ('AntiPipelined apst apst' Z) st m a
   -> dstate
   -> m (a, dstate)
-runAntiPipelinedPeerMain sendQueue doneVar
+runAntiPipelinedPeerMain sendVar doneVar
                          Driver{sendMessage, recvMessage}
                          peer0 dstate0 = do
     threadId <- myThreadId
@@ -442,7 +437,7 @@ runAntiPipelinedPeerMain sendQueue doneVar
   where
     go :: forall st' n.
           dstate
-       -> Peer ps pr ('AntiPipelined n) st' m a
+       -> Peer ps pr ('AntiPipelined apst apst' n) st' m a
        -> m (a, dstate)
     go dstate (Effect k) = k >>= go dstate
     go dstate (Done _ x) = return (x, dstate)
@@ -458,8 +453,8 @@ runAntiPipelinedPeerMain sendQueue doneVar
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
 
-    go dstate (YieldAntiPipelined _refl sender k) = do
-      atomically (writeTQueue sendQueue (SomeSender sender))
+    go dstate (YieldAntiPipelined _refl k) = do
+      atomically $ modifyTVar' sendVar (+ 1)
       go dstate k
 
     go dstate (AntiCollect k mbNonBlocking) = do
@@ -471,24 +466,25 @@ runAntiPipelinedPeerMain sendQueue doneVar
             Nothing -> retry
             Just k' -> pure $ go dstate k'
 
-runAntiPipelinedPeerSenderQueue
-  :: forall ps pr dstate m.
+runAntiPipelinedPeerSender
+  :: forall ps pr apst apst' dstate m.
      ( MonadSTM    m
      , MonadThread m
      )
-  => TQueue m (SomeSender ps pr m)
+  => Sender ps pr apst apst' m
+  -> TVar m Natural
   -> TVar m Natural
   -> Driver ps pr dstate m
   -> m Void
-runAntiPipelinedPeerSenderQueue sendQueue doneVar
+runAntiPipelinedPeerSender sender sendVar doneVar
                                 Driver{sendMessage} = do
 
     threadId <- myThreadId
-    labelThread threadId "antipipelined-sender-queue"
+    labelThread threadId "antipipelined-sender"
     forever $ do
-      SomeSender sender <- atomically (readTQueue sendQueue)
+      atomically $ do n <- readTVar sendVar; check (0 < n); writeTVar sendVar $! n - 1
       runSender sender
-      atomically (modifyTVar' doneVar (+ 1))
+      atomically $ modifyTVar' doneVar (+ 1)
   where
     runSender :: forall stA stZ. Sender ps pr stA stZ m -> m ()
     runSender = \case

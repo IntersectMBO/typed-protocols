@@ -36,7 +36,7 @@ import Network.TypedProtocol.Peer qualified as TP
 
 
 type Client :: forall ps
-            -> IsPipelined
+            -> IsPipelined ps
             -> ps
             -> (Type -> Type)
             -> Type
