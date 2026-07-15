@@ -44,6 +44,7 @@ module Network.TypedProtocol.Core
   , IsPipelined (..)
     -- *** Outstanding
   , Outstanding
+  , AntiOutstanding
     -- *** N and Nat
   , N (..)
   , Nat (Succ, Zero)
@@ -499,6 +500,10 @@ data IsPipelined where
     -- | Non-pipelined peer.
     NonPipelined :: IsPipelined
 
+    -- | Pipelined peer for a /server/ that only ever receives one
+    -- possible request.
+    AntiPipelined    :: N -> IsPipelined
+
 -- | Type level count of the number of outstanding pipelined yields for which
 -- we have not yet collected a receiver result. Used to
 -- ensure that 'Collect' is only used when there are outstanding results to
@@ -508,8 +513,15 @@ data IsPipelined where
 --
 type        Outstanding :: IsPipelined -> N
 type family Outstanding pl where
-  Outstanding 'NonPipelined    = Z
-  Outstanding ('Pipelined n _) = n
+  Outstanding 'NonPipelined      = Z
+  Outstanding ('Pipelined n _)   = n
+  Outstanding ('AntiPipelined _) = Z
+
+type        AntiOutstanding :: IsPipelined -> N
+type family AntiOutstanding pl where
+  AntiOutstanding 'NonPipelined      = Z
+  AntiOutstanding ('Pipelined _ _)   = Z
+  AntiOutstanding ('AntiPipelined n) = n
 
 -- | A value level inductive natural number, indexed by the corresponding type
 -- level natural number 'N'.

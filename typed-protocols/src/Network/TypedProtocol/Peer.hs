@@ -5,7 +5,9 @@
 module Network.TypedProtocol.Peer
   ( Peer (..)
   , PeerPipelined (..)
+  , PeerAntiPipelined (..)
   , Receiver (..)
+  , Sender (..)
   , Outstanding
   , N (..)
   , Nat (Zero, Succ)
@@ -115,6 +117,7 @@ data Peer ps pr pl st m a where
        , StateTokenI st'
        , ActiveState st
        , Outstanding pl ~ Z
+       , AntiOutstanding pl ~ Z
        )
     => WeHaveAgencyProof pr st
     -- ^ agency proof
@@ -169,6 +172,7 @@ data Peer ps pr pl st m a where
        ( StateTokenI st
        , StateAgency st ~ NobodyAgency
        , Outstanding pl ~ Z
+       , AntiOutstanding pl ~ Z
        )
     => NobodyHasAgencyProof pr st
     -- ^ (no) agency proof
@@ -214,8 +218,32 @@ data Peer ps pr pl st m a where
     -- ^ continuation
     -> Peer        ps pr (Pipelined (S n) c) st m a
 
-deriving instance Functor m => Functor (Peer ps pr pl st m)
+  -- | 'AntiPipelined' analog of 'YieldPipelined'
+  YieldAntiPipelined
+    :: forall ps pr (st :: ps) n (st' :: ps) m a.
+       ( StateTokenI st
+       , StateTokenI st'
+       , ActiveState st
+       )
+    => !(WeHaveAgencyProof pr st)
+    -> Sender ps pr st st' m
+       -- ^ how to send
+    -> Peer ps pr (AntiPipelined (S n)) st' m a
+       -- ^ continuation, before or after sending
+    -> Peer ps pr (AntiPipelined    n ) st  m a
 
+  AntiCollect
+    :: forall ps pr n st m a.
+       StateTokenI st
+    =>        Peer ps pr (AntiPipelined    n ) st m a
+       -- ^ how to proceed if the @n+1@fst 'Sender' has already terminated
+    -> Maybe (Peer ps pr (AntiPipelined (S n)) st m a)
+       -- ^ 'Just' if and only if the peer can proceed before the @n+1@st 'Sender' has terminated
+       --
+       -- This is ignored if a message has already been sent
+    -> Peer ps pr (AntiPipelined (S n)) st m a
+
+deriving instance Functor m => Functor (Peer ps pr pl st m)
 
 -- | Receiver.  It is limited to only awaiting for messages and running monadic
 -- computations.  This means that one can only pipeline messages if they can be
@@ -260,6 +288,29 @@ data Receiver ps pr st stdone m c where
 
 deriving instance Functor m => Functor (Receiver ps pr st stdone m)
 
+-- | 'AntiPipelined' analog of 'Receiver'
+type Sender :: forall ps
+            -> PeerRole
+            -> ps
+            -> ps
+            -> (Type -> Type)
+            -> Type
+data Sender ps pr st stdone m where
+
+  SenderEffect :: m (Sender ps pr st stdone m)
+               ->    Sender ps pr st stdone m
+
+  SenderDone   :: Sender ps pr stdone stdone m
+
+  SenderYield  :: ( StateTokenI st
+                  , StateTokenI st'
+                  , ActiveState st
+                  )
+               => !(WeHaveAgencyProof pr st)
+               -> Message ps st st'
+               -> Sender ps pr st' stdone m
+               -> Sender ps pr st  stdone m
+
 -- | A description of a peer that engages in a protocol in a pipelined fashion.
 --
 -- This type is useful for wrapping pipelined peers to hide information which
@@ -271,3 +322,9 @@ data PeerPipelined ps pr (st :: ps) m a where
                   -> PeerPipelined ps pr st m a
 
 deriving instance Functor m => Functor (PeerPipelined ps pr st m)
+
+data PeerAntiPipelined ps pr (st :: ps) m a where
+    PeerAntiPipelined :: { runPeerAntiPipelined :: Peer ps pr (AntiPipelined Z) st m a }
+                  -> PeerAntiPipelined ps pr st m a
+
+deriving instance Functor m => Functor (PeerAntiPipelined ps pr st m)

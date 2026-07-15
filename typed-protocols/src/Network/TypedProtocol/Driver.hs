@@ -13,14 +13,19 @@ module Network.TypedProtocol.Driver
   , runPeerWithDriver
     -- * Pipelined peers
   , runPipelinedPeerWithDriver
+    -- * Anti-pipelined peers
+  , runAntiPipelinedPeerWithDriver
   ) where
 
+import Control.Monad (forever, join)
 import Data.Void (Void)
+import Numeric.Natural (Natural)
 
 import Network.TypedProtocol.Core
 import Network.TypedProtocol.Peer
 
 import Control.Concurrent.Class.MonadSTM.TQueue
+import Control.Concurrent.Class.MonadSTM.TVar
 import Control.DeepSeq (NFData, force)
 import Control.Monad.Class.MonadAsync
 import Control.Monad.Class.MonadFork
@@ -363,3 +368,132 @@ runPipelinedPeerReceiver Driver{recvMessage} = go
     go dstate (ReceiverAwait refl k) = do
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
+
+
+--
+-- Running anti-pipelined peers
+--
+
+-- | An existential wrapper for a queued 'Sender', so that the sender thread's
+-- queue can hold senders regardless of their (from\/to) state indices.
+--
+data SomeSender ps pr m where
+     SomeSender :: Sender ps pr st stdone m -> SomeSender ps pr m
+
+-- | Run an anti-pipelined peer with the given driver.
+--
+-- Dual to 'runPipelinedPeerWithDriver': where a pipelined peer sends ahead and
+-- defers its receives to a parallel receiver thread, an anti-pipelined peer
+-- receives ahead and defers its sends to a parallel sender thread.
+--
+-- Unlike the pipelined driver, there is no trailing-data handoff: the peer
+-- thread performs every 'recvMessage' (so it owns @dstate@ outright), and the
+-- sender thread performs every 'sendMessage'. The two only ever touch opposite
+-- directions of the channel, and the 'AntiOutstanding' index guarantees that
+-- the peer thread's own sends ('Yield'\/'Done') happen only when the sender
+-- thread is idle.
+--
+runAntiPipelinedPeerWithDriver
+  :: forall ps (st :: ps) pr dstate m a.
+     ( MonadAsync m
+     , MonadEvaluate m
+     , NFData a
+     )
+  => Driver ps pr dstate m
+  -> PeerAntiPipelined ps pr st m a
+  -> m (a, dstate)
+runAntiPipelinedPeerWithDriver driver@Driver{initialDState} (PeerAntiPipelined peer) = do
+    sendQueue <- atomically newTQueue
+    doneVar   <- newTVarIO 0
+    r@(a, _dstate) <- runAntiPipelinedPeerSenderQueue sendQueue doneVar driver
+           `withAsyncLoop`
+         runAntiPipelinedPeerMain       sendQueue doneVar driver peer initialDState
+
+    _ <- evaluate (force a)
+    return r
+
+  where
+    withAsyncLoop :: m Void -> m x -> m x
+    withAsyncLoop left right = do
+      -- race will throw if either of the threads throw
+      res <- race left right
+      case res of
+        Left v  -> case v of {}
+        Right a -> return a
+
+
+runAntiPipelinedPeerMain
+  :: forall ps (st :: ps) pr dstate m a.
+     ( MonadSTM    m
+     , MonadThread m
+     )
+  => TQueue m (SomeSender ps pr m)
+  -> TVar m Natural
+  -> Driver ps pr dstate m
+  -> Peer ps pr ('AntiPipelined Z) st m a
+  -> dstate
+  -> m (a, dstate)
+runAntiPipelinedPeerMain sendQueue doneVar
+                         Driver{sendMessage, recvMessage}
+                         peer0 dstate0 = do
+    threadId <- myThreadId
+    labelThread threadId "antipipelined-peer-main"
+    go dstate0 peer0
+  where
+    go :: forall st' n.
+          dstate
+       -> Peer ps pr ('AntiPipelined n) st' m a
+       -> m (a, dstate)
+    go dstate (Effect k) = k >>= go dstate
+    go dstate (Done _ x) = return (x, dstate)
+
+    -- Only reachable at 'AntiPipelined Z' (the constructor demands
+    -- @AntiOutstanding ~ Z@), i.e. when the sender thread is provably idle.
+    go dstate (Yield refl msg k) = do
+      sendMessage refl msg
+      go dstate k
+
+    -- Legal at any 'AntiOutstanding': receiving ahead is the whole point.
+    go dstate (Await refl k) = do
+      (SomeMessage msg, dstate') <- recvMessage refl dstate
+      go dstate' (k msg)
+
+    go dstate (YieldAntiPipelined _refl sender k) = do
+      atomically (writeTQueue sendQueue (SomeSender sender))
+      go dstate k
+
+    go dstate (AntiCollect k mbNonBlocking) = do
+      join $ atomically $ do
+        n <- readTVar doneVar
+        if n > 0
+          then do writeTVar doneVar (n - 1); pure $ go dstate k
+          else case mbNonBlocking of
+            Nothing -> retry
+            Just k' -> pure $ go dstate k'
+
+runAntiPipelinedPeerSenderQueue
+  :: forall ps pr dstate m.
+     ( MonadSTM    m
+     , MonadThread m
+     )
+  => TQueue m (SomeSender ps pr m)
+  -> TVar m Natural
+  -> Driver ps pr dstate m
+  -> m Void
+runAntiPipelinedPeerSenderQueue sendQueue doneVar
+                                Driver{sendMessage} = do
+
+    threadId <- myThreadId
+    labelThread threadId "antipipelined-sender-queue"
+    forever $ do
+      SomeSender sender <- atomically (readTQueue sendQueue)
+      runSender sender
+      atomically (modifyTVar' doneVar (+ 1))
+  where
+    runSender :: forall stA stZ. Sender ps pr stA stZ m -> m ()
+    runSender = \case
+      SenderEffect k         -> k >>= runSender
+      SenderDone             -> return ()
+      SenderYield refl msg k -> do
+        sendMessage refl msg
+        runSender k

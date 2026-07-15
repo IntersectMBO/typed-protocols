@@ -78,6 +78,7 @@ pattern Yield :: forall ps pl st m a.
                  , StateTokenI st'
                  , StateAgency st ~ ServerAgency
                  , Outstanding pl ~ Z
+                 , AntiOutstanding pl ~ Z
                  )
               => Message ps st st'
               -- ^ protocol message
@@ -109,6 +110,7 @@ pattern Done :: forall ps pl st m a.
              => ( StateTokenI st
                 , StateAgency st ~ NobodyAgency
                 , Outstanding pl ~ Z
+                , AntiOutstanding pl ~ Z
                 )
              => a
              -- ^ protocol return value
