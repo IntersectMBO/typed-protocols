@@ -237,7 +237,7 @@ data Peer ps pr pl st m a where
     :: forall ps pr n st apst apst' m a.
        StateTokenI st
     =>        Peer ps pr (AntiPipelined apst apst'   n ) st m a
-       -- ^ how to proceed if the @n+1@fst 'Sender' has already terminated
+       -- ^ how to proceed if/once the @n+1@st 'Sender' has already terminated
     -> Maybe (Peer ps pr (AntiPipelined apst apst' (S n)) st m a)
        -- ^ 'Just' if and only if the peer can proceed before the @n+1@st 'Sender' has terminated
        --
