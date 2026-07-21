@@ -18,9 +18,11 @@ import Network.TypedProtocol.ReqResp.Server
 import Network.TypedProtocol.ReqResp.Type
 
 import Control.Exception (throw)
+import Control.Concurrent.Class.MonadSTM.TVar (newTVarIO, readTVar, writeTVar)
 import Control.Monad.Class.MonadAsync
 import Control.Monad.Class.MonadST
 import Control.Monad.Class.MonadSTM
+import Control.Monad.Class.MonadTest (MonadTest (exploreRaces))
 import Control.Monad.Class.MonadThrow
 import Control.Monad.IOSim
 import Control.Monad.ST (runST)
@@ -63,6 +65,7 @@ tests = testGroup "Network.TypedProtocol.ReqResp"
   , testProperty "channelPipelined IO" prop_channelPipelined_IO
   , testProperty "channelAntiPipelined ST" prop_channelAntiPipelined_ST
   , testProperty "channelAntiPipelined IO" prop_channelAntiPipelined_IO
+  , testProperty "channelAntiPipelined IOSimPOR" prop_channelAntiPipelined_IOSimPOR
 #if !defined(mingw32_HOST_OS)
   , testProperty "namedPipePipelined"  prop_namedPipePipelined_IO
   , testProperty "socketPipelined"     prop_socketPipelined_IO
@@ -304,6 +307,21 @@ prop_channelAntiPipelined_ST g n =
                  $ case traceResult True tr of
                      Left  err -> throw err
                      Right res -> res
+
+-- | The point of the exercise: have IOSimPOR systematically explore the
+-- interleavings of the client's receivers and the server's 'Sender', checking
+-- that the anti-pipelined driver produces the reference result under every
+-- schedule. The request count is kept small so the schedule space stays
+-- tractable.
+--
+prop_channelAntiPipelined_IOSimPOR :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelAntiPipelined_IOSimPOR g (NonNegative n) =
+    withMaxSuccess 20 $
+    exploreSimTrace id (prop_channelAntiPipelined g (NonNegative (min n 6))) $ \_ tr ->
+      case traceResult False tr of
+        Left  failure -> counterexample (show failure) (property False)
+        Right res     -> property res
+
 
 #if !defined(mingw32_HOST_OS)
 prop_namedPipePipelined_IO :: (Int -> Int -> (Int, Int)) -> [Int]

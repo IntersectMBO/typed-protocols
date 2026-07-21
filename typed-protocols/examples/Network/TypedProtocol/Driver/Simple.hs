@@ -15,9 +15,12 @@ module Network.TypedProtocol.Driver.Simple
   , Role (..)
     -- * Pipelined peers
   , runPipelinedPeer
+    -- * Anti-pipelined peers
+  , runAntiPipelinedPeer
     -- * Connected peers
   , runConnectedPeers
   , runConnectedPeersPipelined
+  , runConnectedPeersAntiPipelined
   , runConnectedPeersAsymmetric
     -- * Driver utilities
     -- | This may be useful if you want to write your own driver.
@@ -169,6 +172,33 @@ runPipelinedPeer tracer codec channel peer =
     driver = driverSimple tracer codec channel
 
 
+-- | Run an anti-pipelined peer with the given channel via the given codec.
+--
+-- This runs the peer to completion (if the protocol allows for termination).
+--
+-- Like pipelined peers, anti-pipelined peers rely on concurrency (the 'Sender'
+-- runs in parallel with the main peer), hence the 'MonadAsync' constraint.
+--
+runAntiPipelinedPeer
+  :: forall ps (st :: ps) pr failure bytes m a.
+     ( MonadAsync m
+     , MonadEvaluate m
+     , MonadThrow m
+     , Exception failure
+     , NFData failure
+     , NFData a
+     )
+  => Tracer m (TraceSendRecv ps)
+  -> Codec ps failure m bytes
+  -> Channel m bytes
+  -> PeerAntiPipelined ps pr st m a
+  -> m (a, Maybe bytes)
+runAntiPipelinedPeer tracer codec channel peer =
+    runAntiPipelinedPeerWithDriver driver peer
+  where
+    driver = driverSimple tracer codec channel
+
+
 --
 -- Utils
 --
@@ -250,6 +280,38 @@ runConnectedPeersPipelined createChannels tracer codec client server =
     (fst <$> runPipelinedPeer tracerClient codec clientChannel client)
       `concurrently`
     (fst <$> runPeer          tracerServer codec serverChannel server)
+  where
+    tracerClient = contramap ((,) AsClient) tracer
+    tracerServer = contramap ((,) AsServer) tracer
+
+
+-- | Run a pipelined client against an anti-pipelined server via a pair of
+-- connected 'Channel's and a common 'Codec'. Both peers rely on concurrency:
+-- the client's receivers and the server's 'Sender' each run in parallel with
+-- their main thread, so this is where the interleavings anti-pipelining is
+-- meant to exploit actually occur (unlike @connect@, which forgets them).
+--
+runConnectedPeersAntiPipelined
+  :: ( MonadAsync m
+     , MonadCatch m
+     , MonadEvaluate m
+     , Exception failure
+     , NFData failure
+     , NFData a
+     , NFData b
+     )
+  => m (Channel m bytes, Channel m bytes)
+  -> Tracer m (PeerRole, TraceSendRecv ps)
+  -> Codec ps failure m bytes
+  -> PeerPipelined     ps             pr  st m a
+  -> PeerAntiPipelined ps (FlipAgency pr) st m b
+  -> m (a, b)
+runConnectedPeersAntiPipelined createChannels tracer codec client server =
+    createChannels >>= \(clientChannel, serverChannel) ->
+
+    (fst <$> runPipelinedPeer     tracerClient codec clientChannel client)
+      `concurrently`
+    (fst <$> runAntiPipelinedPeer tracerServer codec serverChannel server)
   where
     tracerClient = contramap ((,) AsClient) tracer
     tracerServer = contramap ((,) AsServer) tracer
