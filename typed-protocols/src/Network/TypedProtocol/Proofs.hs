@@ -12,11 +12,16 @@ module Network.TypedProtocol.Proofs
   ( -- * Connect proofs
     connect
   , connectPipelined
+  , connectAntiPipelined
   , TerminalStates (..)
     -- * Pipelining proofs
     -- | Additional proofs specific to the pipelining features
   , forgetPipelined
   , promoteToPipelined
+    -- * Anti-pipelining proofs
+    -- | Additional proofs specific to the anti-pipelining features
+  , forgetAntiPipelined
+  , promoteToAntiPipelined
     -- ** Pipeline proof helpers
   , Queue (..)
   , enqueue
@@ -224,6 +229,99 @@ connectPipelined
     -- ^ peers results and an evidence of their termination
 connectPipelined csA a b =
     connect (forgetPipelined csA a) b
+
+
+--
+-- Remove Anti-Pipelining
+--
+
+
+-- | Proof that we have a total conversion from anti-pipelined peers to regular
+-- peers. This is the anti-pipelining analogue of 'forgetPipelined'.
+--
+-- Where 'forgetPipelined' inlines each deferred 'Receiver' at the point it is
+-- collected, this inlines the single 'Sender' at each 'YieldAntiPipelined':
+-- the messages the sender thread would have sent asynchronously are instead
+-- sent synchronously, at the point the peer delegated them.
+--
+-- Dually to 'forgetPipelined', the @[Bool]@ chooses the interleaving at each
+-- 'AntiCollect': a @True@ pretends the delegated 'Sender' has not terminated
+-- yet, so the peer takes its non-blocking continuation (when it has one) and
+-- leaves the send outstanding; a @False@ (or @[]@) collects.
+--
+forgetAntiPipelined
+  :: forall ps (pr :: PeerRole) (st :: ps) m a.
+     Functor m
+  => [Bool]
+  -- ^ interleaving choices for anti-pipelining allowed by `AntiCollect` primitive.
+  -- False values or `[]` give no anti-pipelining.
+  -> PeerAntiPipelined ps pr              st m a
+  -> Peer              ps pr NonPipelined st m a
+forgetAntiPipelined cs0 (PeerAntiPipelined (sender :: Sender ps pr apst apst' m) peer0) =
+    goPeer cs0 peer0
+  where
+    goPeer :: forall st' n.
+              [Bool]
+           -> Peer ps pr ('AntiPipelined apst apst' n) st' m a
+           -> Peer ps pr 'NonPipelined                 st' m a
+    goPeer cs (Effect               k) = Effect (goPeer cs <$> k)
+    goPeer _  (Done  refl           k) = Done refl k
+    goPeer cs (Yield refl m         k) = Yield refl m (goPeer cs k)
+    goPeer cs (Await refl           k) = Await refl (goPeer cs . k)
+    goPeer cs (YieldAntiPipelined _ k) = goSender sender (goPeer cs k)
+    goPeer (True:cs') (AntiCollect _ (Just k)) = goPeer cs' k
+    goPeer (_:cs)     (AntiCollect k _)        = goPeer cs  k
+    goPeer cs@[]      (AntiCollect k _)        = goPeer cs  k
+
+    goSender :: forall sst.
+                Sender ps pr sst apst' m
+             -> Peer   ps pr 'NonPipelined apst' m a
+             -> Peer   ps pr 'NonPipelined sst   m a
+    goSender  SenderDone               k = k
+    goSender (SenderEffect         ks) k = Effect ((`goSender` k) <$> ks)
+    goSender (SenderYield refl m   ks) k = Yield refl m (goSender ks k)
+
+
+-- | Promote a peer to an anti-pipelined one, using an empty 'Sender'.
+--
+-- This is a right inverse of 'forgetAntiPipelined', e.g.
+--
+-- >>> forgetAntiPipelined . promoteToAntiPipelined = id
+--
+promoteToAntiPipelined
+  :: forall ps (pr :: PeerRole) (st :: ps) m a.
+     Functor m
+  => Peer              ps pr NonPipelined st m a
+  -- ^ a peer
+  -> PeerAntiPipelined ps pr              st m a
+  -- ^ an anti-pipelined peer
+promoteToAntiPipelined p = PeerAntiPipelined SenderDone (go p)
+  where
+    go :: forall st'.
+          Peer ps pr 'NonPipelined            st' m a
+       -> Peer ps pr ('AntiPipelined st st 'Z) st' m a
+    go (Effect         k) = Effect (go <$> k)
+    go (Yield refl m   k) = Yield refl m (go k)
+    go (Await refl     k) = Await refl (go . k)
+    go (Done  refl     k) = Done refl k
+
+
+-- | Analogous to 'connectPipelined' but for anti-pipelined peers.
+--
+connectAntiPipelined
+  :: forall ps (pr :: PeerRole)
+               (st :: ps) m a b.
+       (Monad m, SingI pr)
+    => [Bool]
+    -- ^ an interleaving
+    -> PeerAntiPipelined ps             pr               st m a
+    -- ^ an anti-pipelined peer
+    -> Peer              ps (FlipAgency pr) NonPipelined st m b
+    -- ^ a non-pipelined peer with flipped agency
+    -> m (a, b, TerminalStates ps)
+    -- ^ peers results and an evidence of their termination
+connectAntiPipelined cs a b =
+    connect (forgetAntiPipelined cs a) b
 
 -- | A reference specification for interleaving of requests and responses
 -- with pipelining, where the environment can choose whether a response is

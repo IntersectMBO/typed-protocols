@@ -14,17 +14,28 @@ module Network.TypedProtocol.Peer.Server
   , pattern Done
   , pattern YieldPipelined
   , pattern Collect
+  , pattern YieldAntiPipelined
+  , pattern AntiCollect
     -- * Receiver type alias and its pattern synonyms
   , Receiver
   , pattern ReceiverEffect
   , pattern ReceiverAwait
   , pattern ReceiverDone
+    -- * Sender type alias and its pattern synonyms
+  , Sender
+  , pattern SenderEffect
+  , pattern SenderYield
+  , pattern SenderDone
     -- * ServerPipelined type alias and its pattern synonym
   , ServerPipelined
   , TP.PeerPipelined (ServerPipelined, runServerPipelined)
+    -- * ServerAntiPipelined type alias and its pattern synonym
+  , ServerAntiPipelined
+  , pattern ServerAntiPipelined
     -- * re-exports
   , IsPipelined (..)
   , Outstanding
+  , AntiOutstanding
   , N (..)
   , Nat (..)
   ) where
@@ -58,6 +69,23 @@ pattern ServerPipelined :: forall ps st m a.
 pattern ServerPipelined { runServerPipelined } = TP.PeerPipelined runServerPipelined
 
 {-# COMPLETE ServerPipelined #-}
+
+
+-- | A description of a peer that engages in a protocol in an anti-pipelined
+-- fashion (ie non-blocking sends).
+--
+type ServerAntiPipelined ps st m a = TP.PeerAntiPipelined ps AsServer st m a
+
+pattern ServerAntiPipelined :: forall ps st m a.
+                               ()
+                            => forall apst apst'.
+                               ()
+                            => Sender ps apst apst' m
+                            -> Server ps (AntiPipelined apst apst' Z) st m a
+                            -> ServerAntiPipelined ps st m a
+pattern ServerAntiPipelined sender peer = TP.PeerAntiPipelined sender peer
+
+{-# COMPLETE ServerAntiPipelined #-}
 
 
 -- | Server role pattern for 'TP.Effect'.
@@ -154,6 +182,35 @@ pattern Collect k' k = TP.Collect k' k
 {-# COMPLETE Effect, Yield, Await, Done, YieldPipelined, Collect  #-}
 
 
+-- | Server role pattern for 'TP.YieldAntiPipelined'
+--
+pattern YieldAntiPipelined :: forall ps st st' n m a.
+                              ()
+                           => ( StateTokenI st
+                              , StateTokenI st'
+                              , StateAgency st ~ ServerAgency
+                              )
+                           => Server ps (AntiPipelined st st' (S n)) st' m a
+                           -- ^ continuation, before or after sending
+                           -> Server ps (AntiPipelined st st'  n ) st  m a
+pattern YieldAntiPipelined k = TP.YieldAntiPipelined ReflServerAgency k
+
+
+-- | Server role pattern for 'TP.AntiCollect'
+--
+pattern AntiCollect :: forall ps st apst apst' n m a.
+                       ()
+                    => StateTokenI st
+                    => Server ps (AntiPipelined apst apst'   n ) st m a
+                    -- ^ continuation if the 'Sender' has already terminated
+                    -> Maybe (Server ps (AntiPipelined apst apst' (S n)) st m a)
+                    -- ^ continuation if the 'Sender' may not have terminated
+                    -> Server ps (AntiPipelined apst apst' (S n)) st m a
+pattern AntiCollect k mk = TP.AntiCollect k mk
+
+{-# COMPLETE Effect, Yield, Await, Done, YieldAntiPipelined, AntiCollect #-}
+
+
 type Receiver ps st stdone m c = TP.Receiver ps AsServer st stdone m c
 
 pattern ReceiverEffect :: forall ps st stdone m c.
@@ -179,3 +236,29 @@ pattern ReceiverDone :: forall ps stdone m c.
 pattern ReceiverDone c = TP.ReceiverDone c
 
 {-# COMPLETE ReceiverEffect, ReceiverAwait, ReceiverDone #-}
+
+
+type Sender ps st stdone m = TP.Sender ps AsServer st stdone m
+
+pattern SenderEffect :: forall ps st stdone m.
+                        m (Sender ps st stdone m)
+                     -> Sender ps st stdone m
+pattern SenderEffect k = TP.SenderEffect k
+
+pattern SenderYield :: forall ps st stdone m.
+                       ()
+                    => forall st'.
+                       ( StateTokenI st
+                       , StateTokenI st'
+                       , StateAgency st ~ ServerAgency
+                       )
+                    => Message ps st st'
+                    -> Sender ps st' stdone m
+                    -> Sender ps st  stdone m
+pattern SenderYield msg k = TP.SenderYield ReflServerAgency msg k
+
+pattern SenderDone :: forall ps stdone m.
+                      Sender ps stdone stdone m
+pattern SenderDone = TP.SenderDone
+
+{-# COMPLETE SenderEffect, SenderYield, SenderDone #-}
