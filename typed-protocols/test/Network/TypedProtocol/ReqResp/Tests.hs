@@ -24,6 +24,7 @@ import Control.Monad.Class.MonadSTM
 import Control.Monad.Class.MonadThrow
 import Control.Monad.IOSim
 import Control.Monad.ST (runST)
+import Control.Monad.Trans.State.Strict (State, runState, state)
 import Control.Tracer (nullTracer)
 
 import Data.Functor.Identity (Identity (..))
@@ -55,10 +56,13 @@ tests = testGroup "Network.TypedProtocol.ReqResp"
   , testProperty "directPipelined"     prop_directPipelined
   , testProperty "connect"             prop_connect
   , testProperty "connectPipelined"    prop_connectPipelined
+  , testProperty "connectAntiPipelined" prop_connectAntiPipelined
   , testProperty "channel ST"          prop_channel_ST
   , testProperty "channel IO"          prop_channel_IO
   , testProperty "channelPipelined ST" prop_channelPipelined_ST
   , testProperty "channelPipelined IO" prop_channelPipelined_IO
+  , testProperty "channelAntiPipelined ST" prop_channelAntiPipelined_ST
+  , testProperty "channelAntiPipelined IO" prop_channelAntiPipelined_IO
 #if !defined(mingw32_HOST_OS)
   , testProperty "namedPipePipelined"  prop_namedPipePipelined_IO
   , testProperty "socketPipelined"     prop_socketPipelined_IO
@@ -168,6 +172,25 @@ prop_connectPipelined cs f xs =
            (s, c) == mapAccumL f 0 xs
 
 
+-- | The dual of 'prop_connectPipelined': an anti-pipelined server (which
+-- ignores the request payload and reads each reply from the state) against a
+-- non-pipelined client. The result must not depend on the interleaving choices.
+--
+prop_connectAntiPipelined :: [Bool] -> (Int -> (Int, Int)) -> NonNegative Int -> Bool
+prop_connectAntiPipelined cs g (NonNegative n) =
+    case runState
+           (connectAntiPipelined cs
+             (reqRespServerPeerAntiPipelined nextResp)
+             (reqRespClientPeer (reqRespClientMap (replicate n ()))))
+           0
+
+      of ((_, resps, TerminalStates SingDone SingDone), acc) ->
+           (acc, resps) == mapAccumL (\a () -> g a) 0 (replicate n ())
+  where
+    nextResp :: State Int Int
+    nextResp = state (\a -> let (a', r) = g a in (r, a'))
+
+
 --
 -- Properties using channels, codecs and drivers.
 --
@@ -232,6 +255,55 @@ prop_channelPipelined_ST f xs =
                      Left  err -> throw err
                      Right res -> res
 
+
+-- | The channel/driver sibling of 'prop_connectAntiPipelined': a pipelined
+-- client against an anti-pipelined server, run through the real
+-- 'runPipelinedPeer' / 'runAntiPipelinedPeer' drivers over a channel. Unlike
+-- @connect@, this genuinely runs the 'Sender' concurrently with the main peer's
+-- receive-ahead, so the anti-pipelining machinery is actually exercised. The
+-- collected replies must equal the reference sequence regardless of the
+-- interleaving the runtime picks.
+--
+prop_channelAntiPipelined :: ( MonadLabelledSTM m
+                             , MonadAsync m
+                             , MonadCatch m
+                             , MonadEvaluate m
+                             , MonadST m
+                             , MonadTest m
+                             )
+                          => (Int -> (Int, Int)) -> NonNegative Int
+                          -> m Bool
+prop_channelAntiPipelined g (NonNegative n) = do
+    -- mark all threads forked from here on as system threads, so IOSimPOR will
+    -- reverse races between the client's receiver and the server's 'Sender'
+    -- (a no-op under IO / plain IOSim)
+    exploreRaces
+    accVar <- newTVarIO 0
+    let nextResp = atomically $ do
+                     a <- readTVar accVar
+                     let (a', r) = g a
+                     writeTVar accVar a'
+                     return r
+        client   = reqRespClientPeerPipelined (reqRespClientMapPipelined (replicate n ()))
+        server   = reqRespServerPeerAntiPipelined nextResp
+    (resps, ()) <- runConnectedPeersAntiPipelined
+                     (createPipelineTestChannels 100)
+                     nullTracer
+                     CBOR.codecReqResp
+                     client server
+    return (resps == snd (mapAccumL (\a () -> g a) 0 (replicate n ())))
+
+prop_channelAntiPipelined_IO :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelAntiPipelined_IO g n =
+    ioProperty (prop_channelAntiPipelined g n)
+
+prop_channelAntiPipelined_ST :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelAntiPipelined_ST g n =
+    let tr = runSimTrace (prop_channelAntiPipelined g n) in
+    counterexample (intercalate "\n" $ map show $ traceEvents tr)
+                 $ case traceResult True tr of
+                     Left  err -> throw err
+                     Right res -> res
 
 #if !defined(mingw32_HOST_OS)
 prop_namedPipePipelined_IO :: (Int -> Int -> (Int, Int)) -> [Int]

@@ -45,3 +45,48 @@ reqRespServerPeer ReqRespServer{..} =
       MsgReq req -> Effect $ do
         (resp, next) <- recvMsgReq req
         pure $ Yield (MsgResp resp) (reqRespServerPeer next)
+
+
+-- | An anti-pipelined 'ReqResp' server.
+--
+-- The single 'Sender' takes no argument, so a reply can depend on its request
+-- only indirectly — by the peer stashing request-derived data into state (via
+-- an 'Effect') for the 'Sender' to read. This example doesn't do that: it
+-- ignores the request payload (hence @()@) and draws each reply from the
+-- supplied action, which typically reads and advances some state. It receives
+-- ahead, delegating every reply to the 'Sender', and is willing — at the
+-- environment's choice — either to collect an outstanding reply or keep
+-- receiving.
+--
+reqRespServerPeerAntiPipelined
+  :: forall resp m. Functor m
+  => m resp
+  -- ^ produce (and record) the next reply
+  -> ServerAntiPipelined (ReqResp () resp) StIdle m ()
+reqRespServerPeerAntiPipelined nextResp =
+    ServerAntiPipelined sender (go Zero)
+  where
+    sender :: Sender (ReqResp () resp) StBusy StIdle m
+    sender = SenderEffect $
+      (\resp -> SenderYield (MsgResp resp) SenderDone) <$> nextResp
+
+    -- with @n@ replies outstanding: collect one if the environment chooses,
+    -- but stay willing to receive ahead
+    go :: forall n.
+          Nat n
+       -> Server (ReqResp () resp) (AntiPipelined StBusy StIdle n) StIdle m ()
+    go  Zero     = await Zero
+    go (Succ n') = AntiCollect (await n') (Just (await (Succ n')))
+
+    await :: forall n.
+             Nat n
+          -> Server (ReqResp () resp) (AntiPipelined StBusy StIdle n) StIdle m ()
+    await n = Await $ \msg -> case msg of
+                MsgReq _ -> YieldAntiPipelined (go (Succ n))
+                MsgDone  -> drain n
+
+    drain :: forall n.
+             Nat n
+          -> Server (ReqResp () resp) (AntiPipelined StBusy StIdle n) StDone m ()
+    drain  Zero     = Done ()
+    drain (Succ n') = AntiCollect (drain n') Nothing

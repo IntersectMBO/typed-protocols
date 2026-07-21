@@ -169,6 +169,7 @@ test-suite test
   build-depends:      base
                     , bytestring
                     , contra-tracer
+                    , transformers
                     , typed-protocols:{typed-protocols,codec-properties,examples}
                     , io-classes:io-classes
                     , io-sim
