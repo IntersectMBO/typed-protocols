@@ -213,6 +213,11 @@ promoteToPipelined p = PeerPipelined (go p)
 -- to more results outstanding. This can also be interpreted as a greater
 -- pipeline depth, or more messages in-flight.
 --
+-- The @[Bool]@ stream permits exploration of some interleavings, but not
+-- all. In particular, it does not explore different possible interleavings of
+-- the 'ReceiverEffect' with the 'Pipelined' peer's 'Effect's: the full
+-- 'Receiver' is always executed immediately first.
+--
 -- This can be exercised using a QuickCheck style generator.
 --
 connectPipelined
