@@ -188,12 +188,12 @@ pattern YieldAntiPipelined :: forall ps st st' n m a.
                               ()
                            => ( StateTokenI st
                               , StateTokenI st'
-                              , StateAgency st ~ ServerAgency
+                              , ActiveState st
                               )
                            => Server ps (AntiPipelined st st' (S n)) st' m a
                            -- ^ continuation, before or after sending
                            -> Server ps (AntiPipelined st st'  n ) st  m a
-pattern YieldAntiPipelined k = TP.YieldAntiPipelined ReflServerAgency k
+pattern YieldAntiPipelined k = TP.YieldAntiPipelined k
 
 
 -- | Server role pattern for 'TP.AntiCollect'

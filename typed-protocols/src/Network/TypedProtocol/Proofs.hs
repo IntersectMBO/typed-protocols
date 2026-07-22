@@ -273,7 +273,7 @@ forgetAntiPipelined cs0 (PeerAntiPipelined (sender :: Sender ps pr apst apst' m)
     goPeer _  (Done  refl           k) = Done refl k
     goPeer cs (Yield refl m         k) = Yield refl m (goPeer cs k)
     goPeer cs (Await refl           k) = Await refl (goPeer cs . k)
-    goPeer cs (YieldAntiPipelined _ k) = goSender sender (goPeer cs k)
+    goPeer cs (YieldAntiPipelined   k) = goSender sender (goPeer cs k)
     goPeer (True:cs') (AntiCollect _ (Just k)) = goPeer cs' k
     goPeer (_:cs)     (AntiCollect k _)        = goPeer cs  k
     goPeer cs@[]      (AntiCollect k _)        = goPeer cs  k
@@ -282,9 +282,9 @@ forgetAntiPipelined cs0 (PeerAntiPipelined (sender :: Sender ps pr apst apst' m)
                 Sender ps pr sst apst' m
              -> Peer   ps pr 'NonPipelined apst' m a
              -> Peer   ps pr 'NonPipelined sst   m a
-    goSender  SenderDone               k = k
-    goSender (SenderEffect         ks) k = Effect ((`goSender` k) <$> ks)
-    goSender (SenderYield refl m   ks) k = Yield refl m (goSender ks k)
+    goSender  SenderDone             k = k
+    goSender (SenderEffect       ks) k = Effect ((`goSender` k) <$> ks)
+    goSender (SenderYield refl m ks) k = Yield refl m (goSender ks k)
 
 
 -- | Promote a peer to an anti-pipelined one, using an empty 'Sender'.

@@ -453,7 +453,7 @@ runAntiPipelinedPeerMain sendVar doneVar
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
 
-    go dstate (YieldAntiPipelined _refl k) = do
+    go dstate (YieldAntiPipelined k) = do
       atomically $ modifyTVar' sendVar (+ 1)
       go dstate k
 
@@ -488,8 +488,8 @@ runAntiPipelinedPeerSender sender sendVar doneVar
   where
     runSender :: forall stA stZ. Sender ps pr stA stZ m -> m ()
     runSender = \case
-      SenderEffect k         -> k >>= runSender
-      SenderDone             -> return ()
-      SenderYield refl msg k -> do
+      SenderEffect k          -> k >>= runSender
+      SenderDone              -> return ()
+      SenderYield  refl msg k -> do
         sendMessage refl msg
         runSender k

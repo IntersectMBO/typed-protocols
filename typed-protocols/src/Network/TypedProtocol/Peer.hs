@@ -220,16 +220,17 @@ data Peer ps pr pl st m a where
 
   -- | 'AntiPipelined' analog of 'YieldPipelined'
   --
-  -- Always uses the 'Sender' that was provided to the driver
-  -- alongside this 'Peer'.
+  -- Always uses the 'Sender' that was provided to the driver alongside this
+  -- 'Peer'. No agency proof is needed here: each message the 'Sender' actually
+  -- sends is guarded by that 'Sender'\'s own 'SenderYield' proof, and a 'Sender'
+  -- that sends nothing needs no agency.
   YieldAntiPipelined
     :: forall ps pr (st :: ps) n (st' :: ps) m a.
        ( StateTokenI st
        , StateTokenI st'
        , ActiveState st
        )
-    => !(WeHaveAgencyProof pr st)
-    -> Peer ps pr (AntiPipelined st st' (S n)) st' m a
+    => Peer ps pr (AntiPipelined st st' (S n)) st' m a
        -- ^ continuation, before or after sending
     -> Peer ps pr (AntiPipelined st st'  n ) st  m a
 
