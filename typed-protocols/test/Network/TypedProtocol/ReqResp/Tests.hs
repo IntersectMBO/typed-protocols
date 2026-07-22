@@ -58,14 +58,14 @@ tests = testGroup "Network.TypedProtocol.ReqResp"
   , testProperty "directPipelined"     prop_directPipelined
   , testProperty "connect"             prop_connect
   , testProperty "connectPipelined"    prop_connectPipelined
-  , testProperty "connectDualPipelined" prop_connectDualPipelined
+  , testProperty "connectDualPipelined1" prop_connectDualPipelined1
   , testProperty "channel ST"          prop_channel_ST
   , testProperty "channel IO"          prop_channel_IO
   , testProperty "channelPipelined ST" prop_channelPipelined_ST
   , testProperty "channelPipelined IO" prop_channelPipelined_IO
-  , testProperty "channelDualPipelined ST" prop_channelDualPipelined_ST
-  , testProperty "channelDualPipelined IO" prop_channelDualPipelined_IO
-  , testProperty "channelDualPipelined IOSimPOR" prop_channelDualPipelined_IOSimPOR
+  , testProperty "channelDualPipelined1 ST" prop_channelDualPipelined1_ST
+  , testProperty "channelDualPipelined1 IO" prop_channelDualPipelined1_IO
+  , testProperty "channelDualPipelined1 IOSimPOR" prop_channelDualPipelined1_IOSimPOR
 #if !defined(mingw32_HOST_OS)
   , testProperty "namedPipePipelined"  prop_namedPipePipelined_IO
   , testProperty "socketPipelined"     prop_socketPipelined_IO
@@ -179,11 +179,11 @@ prop_connectPipelined cs f xs =
 -- ignores the request payload and reads each reply from the state) against a
 -- non-pipelined client. The result must not depend on the interleaving choices.
 --
-prop_connectDualPipelined :: [Bool] -> (Int -> (Int, Int)) -> NonNegative Int -> Bool
-prop_connectDualPipelined cs g (NonNegative n) =
+prop_connectDualPipelined1 :: [Bool] -> (Int -> (Int, Int)) -> NonNegative Int -> Bool
+prop_connectDualPipelined1 cs g (NonNegative n) =
     case runState
-           (connectDualPipelined cs
-             (reqRespServerPeerDualPipelined nextResp)
+           (connectDualPipelined1 cs
+             (reqRespServerPeerDualPipelined1 nextResp)
              (reqRespClientPeer (reqRespClientMap (replicate n ()))))
            0
 
@@ -259,15 +259,15 @@ prop_channelPipelined_ST f xs =
                      Right res -> res
 
 
--- | The channel/driver sibling of 'prop_connectDualPipelined': a pipelined
+-- | The channel/driver sibling of 'prop_connectDualPipelined1': a pipelined
 -- client against an anti-pipelined server, run through the real
--- 'runPipelinedPeer' / 'runDualPipelinedPeer' drivers over a channel. Unlike
+-- 'runPipelinedPeer' / 'runDualPipelined1Peer' drivers over a channel. Unlike
 -- @connect@, this genuinely runs the 'Sender' concurrently with the main peer's
 -- receive-ahead, so the anti-pipelining machinery is actually exercised. The
 -- collected replies must equal the reference sequence regardless of the
 -- interleaving the runtime picks.
 --
-prop_channelDualPipelined :: ( MonadLabelledSTM m
+prop_channelDualPipelined1 :: ( MonadLabelledSTM m
                              , MonadAsync m
                              , MonadCatch m
                              , MonadEvaluate m
@@ -276,7 +276,7 @@ prop_channelDualPipelined :: ( MonadLabelledSTM m
                              )
                           => (Int -> (Int, Int)) -> NonNegative Int
                           -> m Bool
-prop_channelDualPipelined g (NonNegative n) = do
+prop_channelDualPipelined1 g (NonNegative n) = do
     -- mark all threads forked from here on as system threads, so IOSimPOR will
     -- reverse races between the client's receiver and the server's 'Sender'
     -- (a no-op under IO / plain IOSim)
@@ -288,21 +288,21 @@ prop_channelDualPipelined g (NonNegative n) = do
                      writeTVar accVar a'
                      return r
         client   = reqRespClientPeerPipelined (reqRespClientMapPipelined (replicate n ()))
-        server   = reqRespServerPeerDualPipelined nextResp
-    (resps, ()) <- runConnectedPeersDualPipelined
+        server   = reqRespServerPeerDualPipelined1 nextResp
+    (resps, ()) <- runConnectedPeersDualPipelined1
                      (createPipelineTestChannels 100)
                      nullTracer
                      CBOR.codecReqResp
                      client server
     return (resps == snd (mapAccumL (\a () -> g a) 0 (replicate n ())))
 
-prop_channelDualPipelined_IO :: (Int -> (Int, Int)) -> NonNegative Int -> Property
-prop_channelDualPipelined_IO g n =
-    ioProperty (prop_channelDualPipelined g n)
+prop_channelDualPipelined1_IO :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelDualPipelined1_IO g n =
+    ioProperty (prop_channelDualPipelined1 g n)
 
-prop_channelDualPipelined_ST :: (Int -> (Int, Int)) -> NonNegative Int -> Property
-prop_channelDualPipelined_ST g n =
-    let tr = runSimTrace (prop_channelDualPipelined g n) in
+prop_channelDualPipelined1_ST :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelDualPipelined1_ST g n =
+    let tr = runSimTrace (prop_channelDualPipelined1 g n) in
     counterexample (intercalate "\n" $ map show $ traceEvents tr)
                  $ case traceResult True tr of
                      Left  err -> throw err
@@ -314,10 +314,10 @@ prop_channelDualPipelined_ST g n =
 -- schedule. The request count is kept small so the schedule space stays
 -- tractable.
 --
-prop_channelDualPipelined_IOSimPOR :: (Int -> (Int, Int)) -> NonNegative Int -> Property
-prop_channelDualPipelined_IOSimPOR g (NonNegative n) =
+prop_channelDualPipelined1_IOSimPOR :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelDualPipelined1_IOSimPOR g (NonNegative n) =
     withMaxSuccess 20 $
-    exploreSimTrace id (prop_channelDualPipelined g (NonNegative (min n 6))) $ \_ tr ->
+    exploreSimTrace id (prop_channelDualPipelined1 g (NonNegative (min n 6))) $ \_ tr ->
       case traceResult False tr of
         Left  failure -> counterexample (show failure) (property False)
         Right res     -> property res

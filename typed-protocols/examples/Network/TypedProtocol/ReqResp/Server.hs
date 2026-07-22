@@ -58,13 +58,13 @@ reqRespServerPeer ReqRespServer{..} =
 -- environment's choice — either to collect an outstanding reply or keep
 -- receiving.
 --
-reqRespServerPeerDualPipelined
+reqRespServerPeerDualPipelined1
   :: forall resp m. Functor m
   => m resp
   -- ^ produce (and record) the next reply
-  -> ServerDualPipelined (ReqResp () resp) StIdle m ()
-reqRespServerPeerDualPipelined nextResp =
-    ServerDualPipelined sender (go Zero)
+  -> ServerDualPipelined1 (ReqResp () resp) StIdle m ()
+reqRespServerPeerDualPipelined1 nextResp =
+    ServerDualPipelined1 sender (go Zero)
   where
     sender :: Sender (ReqResp () resp) StBusy StIdle m
     sender = SenderEffect $
@@ -74,19 +74,19 @@ reqRespServerPeerDualPipelined nextResp =
     -- but stay willing to receive ahead
     go :: forall n.
           Nat n
-       -> Server (ReqResp () resp) (DualPipelined StBusy StIdle n) StIdle m ()
+       -> Server (ReqResp () resp) (DualPipelined1 StBusy StIdle n) StIdle m ()
     go  Zero     = await Zero
-    go (Succ n') = DualCollect (await n') (Just (await (Succ n')))
+    go (Succ n') = DualCollect1 (await n') (Just (await (Succ n')))
 
     await :: forall n.
              Nat n
-          -> Server (ReqResp () resp) (DualPipelined StBusy StIdle n) StIdle m ()
+          -> Server (ReqResp () resp) (DualPipelined1 StBusy StIdle n) StIdle m ()
     await n = Await $ \msg -> case msg of
-                MsgReq _ -> YieldDualPipelined (go (Succ n))
+                MsgReq _ -> YieldDualPipelined1 (go (Succ n))
                 MsgDone  -> drain n
 
     drain :: forall n.
              Nat n
-          -> Server (ReqResp () resp) (DualPipelined StBusy StIdle n) StDone m ()
+          -> Server (ReqResp () resp) (DualPipelined1 StBusy StIdle n) StDone m ()
     drain  Zero     = Done ()
-    drain (Succ n') = DualCollect (drain n') Nothing
+    drain (Succ n') = DualCollect1 (drain n') Nothing

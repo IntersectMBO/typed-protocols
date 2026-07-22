@@ -15,7 +15,7 @@ module Network.TypedProtocol.Driver
     -- * Pipelined peers
   , runPipelinedPeerWithDriver
     -- * Dual-pipelined peers
-  , runDualPipelinedPeerWithDriver
+  , runDualPipelined1PeerWithDriver
   ) where
 
 import Control.Monad (forever, join)
@@ -388,21 +388,21 @@ runPipelinedPeerReceiver Driver{recvMessage} = go
 -- the peer thread's own sends ('Yield'\/'Done') happen only when the sender
 -- thread is idle.
 --
-runDualPipelinedPeerWithDriver
+runDualPipelined1PeerWithDriver
   :: forall ps (st :: ps) pr dstate m a.
      ( MonadAsync m
      , MonadEvaluate m
      , NFData a
      )
   => Driver ps pr dstate m
-  -> PeerDualPipelined ps pr st m a
+  -> PeerDualPipelined1 ps pr st m a
   -> m (a, dstate)
-runDualPipelinedPeerWithDriver driver@Driver{initialDState} (PeerDualPipelined sender peer) = do
+runDualPipelined1PeerWithDriver driver@Driver{initialDState} (PeerDualPipelined1 sender peer) = do
     sendVar <- newTVarIO 0
     doneVar <- newTVarIO 0
-    r@(a, _dstate) <- runDualPipelinedPeerSender sender sendVar doneVar driver
+    r@(a, _dstate) <- runDualPipelined1PeerSender sender sendVar doneVar driver
            `withAsyncLoop`
-         runDualPipelinedPeerMain       sendVar doneVar driver peer initialDState
+         runDualPipelined1PeerMain       sendVar doneVar driver peer initialDState
 
     _ <- evaluate (force a)
     return r
@@ -417,7 +417,7 @@ runDualPipelinedPeerWithDriver driver@Driver{initialDState} (PeerDualPipelined s
         Right a -> return a
 
 
-runDualPipelinedPeerMain
+runDualPipelined1PeerMain
   :: forall ps (apst :: ps) (apst' :: ps) (st :: ps) pr dstate m a.
      ( MonadSTM    m
      , MonadThread m
@@ -425,10 +425,10 @@ runDualPipelinedPeerMain
   => TVar m Natural
   -> TVar m Natural
   -> Driver ps pr dstate m
-  -> Peer ps pr ('DualPipelined apst apst' Z) st m a
+  -> Peer ps pr ('DualPipelined1 apst apst' Z) st m a
   -> dstate
   -> m (a, dstate)
-runDualPipelinedPeerMain sendVar doneVar
+runDualPipelined1PeerMain sendVar doneVar
                          Driver{sendMessage, recvMessage}
                          peer0 dstate0 = do
     threadId <- myThreadId
@@ -437,12 +437,12 @@ runDualPipelinedPeerMain sendVar doneVar
   where
     go :: forall st' n.
           dstate
-       -> Peer ps pr ('DualPipelined apst apst' n) st' m a
+       -> Peer ps pr ('DualPipelined1 apst apst' n) st' m a
        -> m (a, dstate)
     go dstate (Effect k) = k >>= go dstate
     go dstate (Done _ x) = return (x, dstate)
 
-    -- Only reachable at 'DualPipelined Z' (the constructor demands
+    -- Only reachable at 'DualPipelined1 Z' (the constructor demands
     -- @DualOutstanding ~ Z@), i.e. when the sender thread is provably idle.
     go dstate (Yield refl msg k) = do
       sendMessage refl msg
@@ -453,11 +453,11 @@ runDualPipelinedPeerMain sendVar doneVar
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
 
-    go dstate (YieldDualPipelined k) = do
+    go dstate (YieldDualPipelined1 k) = do
       atomically $ modifyTVar' sendVar (+ 1)
       go dstate k
 
-    go dstate (DualCollect k mbNonBlocking) = do
+    go dstate (DualCollect1 k mbNonBlocking) = do
       join $ atomically $ do
         n <- readTVar doneVar
         if n > 0
@@ -466,7 +466,7 @@ runDualPipelinedPeerMain sendVar doneVar
             Nothing -> retry
             Just k' -> pure $ go dstate k'
 
-runDualPipelinedPeerSender
+runDualPipelined1PeerSender
   :: forall ps pr apst apst' dstate m.
      ( MonadSTM    m
      , MonadThread m
@@ -476,7 +476,7 @@ runDualPipelinedPeerSender
   -> TVar m Natural
   -> Driver ps pr dstate m
   -> m Void
-runDualPipelinedPeerSender sender sendVar doneVar
+runDualPipelined1PeerSender sender sendVar doneVar
                                 Driver{sendMessage} = do
 
     threadId <- myThreadId

@@ -16,11 +16,11 @@ module Network.TypedProtocol.Driver.Simple
     -- * Pipelined peers
   , runPipelinedPeer
     -- * Dual-pipelined peers
-  , runDualPipelinedPeer
+  , runDualPipelined1Peer
     -- * Connected peers
   , runConnectedPeers
   , runConnectedPeersPipelined
-  , runConnectedPeersDualPipelined
+  , runConnectedPeersDualPipelined1
   , runConnectedPeersAsymmetric
     -- * Driver utilities
     -- | This may be useful if you want to write your own driver.
@@ -179,7 +179,7 @@ runPipelinedPeer tracer codec channel peer =
 -- Like pipelined peers, anti-pipelined peers rely on concurrency (the 'Sender'
 -- runs in parallel with the main peer), hence the 'MonadAsync' constraint.
 --
-runDualPipelinedPeer
+runDualPipelined1Peer
   :: forall ps (st :: ps) pr failure bytes m a.
      ( MonadAsync m
      , MonadEvaluate m
@@ -191,10 +191,10 @@ runDualPipelinedPeer
   => Tracer m (TraceSendRecv ps)
   -> Codec ps failure m bytes
   -> Channel m bytes
-  -> PeerDualPipelined ps pr st m a
+  -> PeerDualPipelined1 ps pr st m a
   -> m (a, Maybe bytes)
-runDualPipelinedPeer tracer codec channel peer =
-    runDualPipelinedPeerWithDriver driver peer
+runDualPipelined1Peer tracer codec channel peer =
+    runDualPipelined1PeerWithDriver driver peer
   where
     driver = driverSimple tracer codec channel
 
@@ -291,7 +291,7 @@ runConnectedPeersPipelined createChannels tracer codec client server =
 -- their main thread, so this is where the interleavings anti-pipelining is
 -- meant to exploit actually occur (unlike @connect@, which forgets them).
 --
-runConnectedPeersDualPipelined
+runConnectedPeersDualPipelined1
   :: ( MonadAsync m
      , MonadCatch m
      , MonadEvaluate m
@@ -304,14 +304,14 @@ runConnectedPeersDualPipelined
   -> Tracer m (PeerRole, TraceSendRecv ps)
   -> Codec ps failure m bytes
   -> PeerPipelined     ps             pr  st m a
-  -> PeerDualPipelined ps (FlipAgency pr) st m b
+  -> PeerDualPipelined1 ps (FlipAgency pr) st m b
   -> m (a, b)
-runConnectedPeersDualPipelined createChannels tracer codec client server =
+runConnectedPeersDualPipelined1 createChannels tracer codec client server =
     createChannels >>= \(clientChannel, serverChannel) ->
 
     (fst <$> runPipelinedPeer     tracerClient codec clientChannel client)
       `concurrently`
-    (fst <$> runDualPipelinedPeer tracerServer codec serverChannel server)
+    (fst <$> runDualPipelined1Peer tracerServer codec serverChannel server)
   where
     tracerClient = contramap ((,) AsClient) tracer
     tracerServer = contramap ((,) AsServer) tracer

@@ -5,7 +5,7 @@
 module Network.TypedProtocol.Peer
   ( Peer (..)
   , PeerPipelined (..)
-  , PeerDualPipelined (..)
+  , PeerDualPipelined1 (..)
   , Receiver (..)
   , Sender (..)
   , Outstanding
@@ -218,31 +218,32 @@ data Peer ps pr pl st m a where
     -- ^ continuation
     -> Peer        ps pr (Pipelined (S n) c) st m a
 
-  -- | 'DualPipelined' analog of 'YieldPipelined'
+  -- | 'DualPipelined1' analog of 'YieldPipelined'
   --
   -- Always uses the 'Sender' that was provided to the driver alongside this
   -- 'Peer'. No agency proof is needed here: each message the 'Sender' actually
   -- sends is guarded by that 'Sender'\'s own 'SenderYield' proof, and a 'Sender'
   -- that sends nothing needs no agency.
-  YieldDualPipelined
+  YieldDualPipelined1
     :: forall ps pr (st :: ps) n (st' :: ps) m a.
        ( StateTokenI st
        , StateTokenI st'
        )
-    => Peer ps pr (DualPipelined st st' (S n)) st' m a
+    => {- Sender ps pr st st' m
+    -> -} Peer ps pr (DualPipelined1 st st' (S n)) st' m a
        -- ^ continuation, before or after sending
-    -> Peer ps pr (DualPipelined st st'  n ) st  m a
+    -> Peer ps pr (DualPipelined1 st st'  n ) st  m a
 
-  DualCollect
+  DualCollect1
     :: forall ps pr n st apst apst' m a.
        StateTokenI st
-    =>        Peer ps pr (DualPipelined apst apst'   n ) st m a
+    =>        Peer ps pr (DualPipelined1 apst apst'   n ) st m a
        -- ^ how to proceed if/once the @n+1@st 'Sender' has already terminated
-    -> Maybe (Peer ps pr (DualPipelined apst apst' (S n)) st m a)
+    -> Maybe (Peer ps pr (DualPipelined1 apst apst' (S n)) st m a)
        -- ^ 'Just' if and only if the peer can proceed before the @n+1@st 'Sender' has terminated
        --
        -- This is ignored if a message has already been sent
-    -> Peer ps pr (DualPipelined apst apst' (S n)) st m a
+    -> Peer ps pr (DualPipelined1 apst apst' (S n)) st m a
 
 deriving instance Functor m => Functor (Peer ps pr pl st m)
 
@@ -289,7 +290,7 @@ data Receiver ps pr st stdone m c where
 
 deriving instance Functor m => Functor (Receiver ps pr st stdone m)
 
--- | 'DualPipelined' analog of 'Receiver'
+-- | 'DualPipelined1' analog of 'Receiver'
 type Sender :: forall ps
             -> PeerRole
             -> ps
@@ -324,10 +325,10 @@ data PeerPipelined ps pr (st :: ps) m a where
 
 deriving instance Functor m => Functor (PeerPipelined ps pr st m)
 
-data PeerDualPipelined ps pr (st :: ps) m a where
-    PeerDualPipelined ::
+data PeerDualPipelined1 ps pr (st :: ps) m a where
+    PeerDualPipelined1 ::
       Sender ps pr apst apst' m ->
-      Peer ps pr (DualPipelined apst apst' Z) st m a ->
-      PeerDualPipelined ps pr st m a
+      Peer ps pr (DualPipelined1 apst apst' Z) st m a ->
+      PeerDualPipelined1 ps pr st m a
 
-deriving instance Functor m => Functor (PeerDualPipelined ps pr st m)
+deriving instance Functor m => Functor (PeerDualPipelined1 ps pr st m)

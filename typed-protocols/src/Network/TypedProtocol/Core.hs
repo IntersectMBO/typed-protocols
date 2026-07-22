@@ -501,8 +501,8 @@ data IsPipelined ps where
     NonPipelined  :: IsPipelined ps
 
     -- | Pipelined peer for a /server/ that only ever uses one
-    -- 'Network.TypedProtocol.Peer.Sender'
-    DualPipelined :: ps -> ps -> N -> IsPipelined ps
+    -- 'Network.TypedProtocol.Peer.Sender' (hence the @1@ suffix)
+    DualPipelined1 :: ps -> ps -> N -> IsPipelined ps
 
 -- | Type level count of the number of outstanding pipelined yields for which
 -- we have not yet collected a receiver result. Used to
@@ -515,13 +515,13 @@ type        Outstanding :: IsPipelined ps -> N
 type family Outstanding pl where
   Outstanding 'NonPipelined          = Z
   Outstanding ('Pipelined n _)       = n
-  Outstanding ('DualPipelined _ _ _) = Z
+  Outstanding ('DualPipelined1 _ _ _) = Z
 
 type        DualOutstanding :: IsPipelined ps -> N
 type family DualOutstanding pl where
   DualOutstanding 'NonPipelined          = Z
   DualOutstanding ('Pipelined _ _)       = Z
-  DualOutstanding ('DualPipelined _ _ n) = n
+  DualOutstanding ('DualPipelined1 _ _ n) = n
 
 -- | A value level inductive natural number, indexed by the corresponding type
 -- level natural number 'N'.

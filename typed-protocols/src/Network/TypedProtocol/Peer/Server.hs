@@ -14,8 +14,8 @@ module Network.TypedProtocol.Peer.Server
   , pattern Done
   , pattern YieldPipelined
   , pattern Collect
-  , pattern YieldDualPipelined
-  , pattern DualCollect
+  , pattern YieldDualPipelined1
+  , pattern DualCollect1
     -- * Receiver type alias and its pattern synonyms
   , Receiver
   , pattern ReceiverEffect
@@ -29,9 +29,9 @@ module Network.TypedProtocol.Peer.Server
     -- * ServerPipelined type alias and its pattern synonym
   , ServerPipelined
   , TP.PeerPipelined (ServerPipelined, runServerPipelined)
-    -- * ServerDualPipelined type alias and its pattern synonym
-  , ServerDualPipelined
-  , pattern ServerDualPipelined
+    -- * ServerDualPipelined1 type alias and its pattern synonym
+  , ServerDualPipelined1
+  , pattern ServerDualPipelined1
     -- * re-exports
   , IsPipelined (..)
   , Outstanding
@@ -74,18 +74,18 @@ pattern ServerPipelined { runServerPipelined } = TP.PeerPipelined runServerPipel
 -- | A description of a peer that engages in a protocol in an anti-pipelined
 -- fashion (ie non-blocking sends).
 --
-type ServerDualPipelined ps st m a = TP.PeerDualPipelined ps AsServer st m a
+type ServerDualPipelined1 ps st m a = TP.PeerDualPipelined1 ps AsServer st m a
 
-pattern ServerDualPipelined :: forall ps st m a.
+pattern ServerDualPipelined1 :: forall ps st m a.
                                ()
                             => forall apst apst'.
                                ()
                             => Sender ps apst apst' m
-                            -> Server ps (DualPipelined apst apst' Z) st m a
-                            -> ServerDualPipelined ps st m a
-pattern ServerDualPipelined sender peer = TP.PeerDualPipelined sender peer
+                            -> Server ps (DualPipelined1 apst apst' Z) st m a
+                            -> ServerDualPipelined1 ps st m a
+pattern ServerDualPipelined1 sender peer = TP.PeerDualPipelined1 sender peer
 
-{-# COMPLETE ServerDualPipelined #-}
+{-# COMPLETE ServerDualPipelined1 #-}
 
 
 -- | Server role pattern for 'TP.Effect'.
@@ -182,32 +182,32 @@ pattern Collect k' k = TP.Collect k' k
 {-# COMPLETE Effect, Yield, Await, Done, YieldPipelined, Collect  #-}
 
 
--- | Server role pattern for 'TP.YieldDualPipelined'
+-- | Server role pattern for 'TP.YieldDualPipelined1'
 --
-pattern YieldDualPipelined :: forall ps st st' n m a.
+pattern YieldDualPipelined1 :: forall ps st st' n m a.
                               ()
                            => ( StateTokenI st
                               , StateTokenI st'
                               )
-                           => Server ps (DualPipelined st st' (S n)) st' m a
+                           => Server ps (DualPipelined1 st st' (S n)) st' m a
                            -- ^ continuation, before or after sending
-                           -> Server ps (DualPipelined st st'  n ) st  m a
-pattern YieldDualPipelined k = TP.YieldDualPipelined k
+                           -> Server ps (DualPipelined1 st st'  n ) st  m a
+pattern YieldDualPipelined1 k = TP.YieldDualPipelined1 k
 
 
--- | Server role pattern for 'TP.DualCollect'
+-- | Server role pattern for 'TP.DualCollect1'
 --
-pattern DualCollect :: forall ps st apst apst' n m a.
+pattern DualCollect1 :: forall ps st apst apst' n m a.
                        ()
                     => StateTokenI st
-                    => Server ps (DualPipelined apst apst'   n ) st m a
+                    => Server ps (DualPipelined1 apst apst'   n ) st m a
                     -- ^ continuation if the 'Sender' has already terminated
-                    -> Maybe (Server ps (DualPipelined apst apst' (S n)) st m a)
+                    -> Maybe (Server ps (DualPipelined1 apst apst' (S n)) st m a)
                     -- ^ continuation if the 'Sender' may not have terminated
-                    -> Server ps (DualPipelined apst apst' (S n)) st m a
-pattern DualCollect k mk = TP.DualCollect k mk
+                    -> Server ps (DualPipelined1 apst apst' (S n)) st m a
+pattern DualCollect1 k mk = TP.DualCollect1 k mk
 
-{-# COMPLETE Effect, Yield, Await, Done, YieldDualPipelined, DualCollect #-}
+{-# COMPLETE Effect, Yield, Await, Done, YieldDualPipelined1, DualCollect1 #-}
 
 
 type Receiver ps st stdone m c = TP.Receiver ps AsServer st stdone m c

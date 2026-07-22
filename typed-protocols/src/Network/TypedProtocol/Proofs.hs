@@ -12,7 +12,7 @@ module Network.TypedProtocol.Proofs
   ( -- * Connect proofs
     connect
   , connectPipelined
-  , connectDualPipelined
+  , connectDualPipelined1
   , TerminalStates (..)
     -- * Pipelining proofs
     -- | Additional proofs specific to the pipelining features
@@ -20,8 +20,8 @@ module Network.TypedProtocol.Proofs
   , promoteToPipelined
     -- * Dual-pipelining proofs
     -- | Additional proofs specific to the anti-pipelining features
-  , forgetDualPipelined
-  , promoteToDualPipelined
+  , forgetDualPipelined1
+  , promoteToDualPipelined1
     -- ** Pipeline proof helpers
   , Queue (..)
   , enqueue
@@ -245,38 +245,38 @@ connectPipelined csA a b =
 -- peers. This is the anti-pipelining analogue of 'forgetPipelined'.
 --
 -- Where 'forgetPipelined' inlines each deferred 'Receiver' at the point it is
--- collected, this inlines the single 'Sender' at each 'YieldDualPipelined':
+-- collected, this inlines the single 'Sender' at each 'YieldDualPipelined1':
 -- the messages the sender thread would have sent asynchronously are instead
 -- sent synchronously, at the point the peer delegated them.
 --
 -- Dually to 'forgetPipelined', the @[Bool]@ chooses the interleaving at each
--- 'DualCollect': a @True@ pretends the delegated 'Sender' has not terminated
+-- 'DualCollect1': a @True@ pretends the delegated 'Sender' has not terminated
 -- yet, so the peer takes its non-blocking continuation (when it has one) and
 -- leaves the send outstanding; a @False@ (or @[]@) collects.
 --
-forgetDualPipelined
+forgetDualPipelined1
   :: forall ps (pr :: PeerRole) (st :: ps) m a.
      Functor m
   => [Bool]
-  -- ^ interleaving choices for anti-pipelining allowed by `DualCollect` primitive.
+  -- ^ interleaving choices for anti-pipelining allowed by `DualCollect1` primitive.
   -- False values or `[]` give no anti-pipelining.
-  -> PeerDualPipelined ps pr              st m a
+  -> PeerDualPipelined1 ps pr              st m a
   -> Peer              ps pr NonPipelined st m a
-forgetDualPipelined cs0 (PeerDualPipelined (sender :: Sender ps pr apst apst' m) peer0) =
+forgetDualPipelined1 cs0 (PeerDualPipelined1 (sender :: Sender ps pr apst apst' m) peer0) =
     goPeer cs0 peer0
   where
     goPeer :: forall st' n.
               [Bool]
-           -> Peer ps pr ('DualPipelined apst apst' n) st' m a
+           -> Peer ps pr ('DualPipelined1 apst apst' n) st' m a
            -> Peer ps pr 'NonPipelined                 st' m a
     goPeer cs (Effect               k) = Effect (goPeer cs <$> k)
     goPeer _  (Done  refl           k) = Done refl k
     goPeer cs (Yield refl m         k) = Yield refl m (goPeer cs k)
     goPeer cs (Await refl           k) = Await refl (goPeer cs . k)
-    goPeer cs (YieldDualPipelined   k) = goSender sender (goPeer cs k)
-    goPeer (True:cs') (DualCollect _ (Just k)) = goPeer cs' k
-    goPeer (_:cs)     (DualCollect k _)        = goPeer cs  k
-    goPeer cs@[]      (DualCollect k _)        = goPeer cs  k
+    goPeer cs (YieldDualPipelined1   k) = goSender sender (goPeer cs k)
+    goPeer (True:cs') (DualCollect1 _ (Just k)) = goPeer cs' k
+    goPeer (_:cs)     (DualCollect1 k _)        = goPeer cs  k
+    goPeer cs@[]      (DualCollect1 k _)        = goPeer cs  k
 
     goSender :: forall sst.
                 Sender ps pr sst apst' m
@@ -289,22 +289,22 @@ forgetDualPipelined cs0 (PeerDualPipelined (sender :: Sender ps pr apst apst' m)
 
 -- | Promote a peer to an anti-pipelined one, using an empty 'Sender'.
 --
--- This is a right inverse of 'forgetDualPipelined', e.g.
+-- This is a right inverse of 'forgetDualPipelined1', e.g.
 --
--- >>> forgetDualPipelined . promoteToDualPipelined = id
+-- >>> forgetDualPipelined1 . promoteToDualPipelined1 = id
 --
-promoteToDualPipelined
+promoteToDualPipelined1
   :: forall ps (pr :: PeerRole) (st :: ps) m a.
      Functor m
   => Peer              ps pr NonPipelined st m a
   -- ^ a peer
-  -> PeerDualPipelined ps pr              st m a
+  -> PeerDualPipelined1 ps pr              st m a
   -- ^ an anti-pipelined peer
-promoteToDualPipelined p = PeerDualPipelined SenderDone (go p)
+promoteToDualPipelined1 p = PeerDualPipelined1 SenderDone (go p)
   where
     go :: forall st'.
           Peer ps pr 'NonPipelined            st' m a
-       -> Peer ps pr ('DualPipelined st st 'Z) st' m a
+       -> Peer ps pr ('DualPipelined1 st st 'Z) st' m a
     go (Effect         k) = Effect (go <$> k)
     go (Yield refl m   k) = Yield refl m (go k)
     go (Await refl     k) = Await refl (go . k)
@@ -313,20 +313,20 @@ promoteToDualPipelined p = PeerDualPipelined SenderDone (go p)
 
 -- | Analogous to 'connectPipelined' but for anti-pipelined peers.
 --
-connectDualPipelined
+connectDualPipelined1
   :: forall ps (pr :: PeerRole)
                (st :: ps) m a b.
        (Monad m, SingI pr)
     => [Bool]
     -- ^ an interleaving
-    -> PeerDualPipelined ps             pr               st m a
+    -> PeerDualPipelined1 ps             pr               st m a
     -- ^ an anti-pipelined peer
     -> Peer              ps (FlipAgency pr) NonPipelined st m b
     -- ^ a non-pipelined peer with flipped agency
     -> m (a, b, TerminalStates ps)
     -- ^ peers results and an evidence of their termination
-connectDualPipelined cs a b =
-    connect (forgetDualPipelined cs a) b
+connectDualPipelined1 cs a b =
+    connect (forgetDualPipelined1 cs a) b
 
 -- | A reference specification for interleaving of requests and responses
 -- with pipelining, where the environment can choose whether a response is
