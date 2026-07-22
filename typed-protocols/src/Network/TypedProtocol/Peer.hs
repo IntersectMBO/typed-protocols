@@ -218,21 +218,29 @@ data Peer ps pr pl st m a where
     -- ^ continuation
     -> Peer        ps pr (Pipelined (S n) c) st m a
 
-  -- | 'DualPipelined1' analog of 'YieldPipelined'
+  -- | "Fork"/"spawn" a 'Sender' that will transition from @st@ to @st'@ by
+  -- sending zero or more messages without /receiving/ any, and then proceed as
+  -- if already in @st'@ even without necessarily waiting for the 'Sender' to
+  -- finish
   --
-  -- Always uses the 'Sender' that was provided to the driver alongside this
-  -- 'Peer'. No agency proof is needed here: each message the 'Sender' actually
-  -- sends is guarded by that 'Sender'\'s own 'SenderYield' proof, and a 'Sender'
-  -- that sends nothing needs no agency.
+  -- So that the 'Peer''s driver can maintain merely a counter instead of a
+  -- queue, this always uses the same 'Sender', which was provided to the driver
+  -- alongside this 'Peer'. Hence the @1@ suffix.
+  --
+  -- Note that 'YieldPipelined' both sends a message and provides a receiver;
+  -- that is unnecessary, it could be decomposed into a plain 'Yield' and the
+  -- core 'Pipelined' primitive, which would only have a 'Receiver'
+  -- argument. That primitive would be explicitly symmetric to the hypothetical
+  -- @YieldDualPipelined@ that takes a 'Sender' to be enqueued (instead of the
+  -- @...1@ optimization present here).
   YieldDualPipelined1
     :: forall ps pr (st :: ps) n (st' :: ps) m a.
        ( StateTokenI st
        , StateTokenI st'
        )
-    => {- Sender ps pr st st' m
-    -> -} Peer ps pr (DualPipelined1 st st' (S n)) st' m a
-       -- ^ continuation, before or after sending
-    -> Peer ps pr (DualPipelined1 st st'  n ) st  m a
+    => Peer ps pr (DualPipelined1 st st' (S n)) st' m a
+       -- ^ continuation, before or after the 'Sender' finishes
+    -> Peer ps pr (DualPipelined1 st st'    n ) st  m a
 
   DualCollect1
     :: forall ps pr n st apst apst' m a.
