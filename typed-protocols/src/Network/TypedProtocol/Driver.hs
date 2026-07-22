@@ -154,7 +154,7 @@ runPeerWithDriver Driver{sendMessage, recvMessage, initialDState} =
       x' <- evaluate (force x)
       return (x', dstate)
 
-    go dstate (Yield2 refl msg k) = do
+    go dstate (Yield refl msg k) = do
       sendMessage refl msg
       go dstate k
 
@@ -293,16 +293,17 @@ runPipelinedPeerSender receiveQueue collectQueue
     go n    dstate             (Effect k) = k >>= go n dstate
     go Zero (HasDState dstate) (Done _ x) = return (x, dstate)
 
-    go n dstate (Yield2 refl msg k) = do
+    go Zero dstate (Yield refl msg k) = do
       sendMessage refl msg
-      go n dstate k
+      go Zero dstate k
 
     go Zero (HasDState dstate) (Await stok k) = do
       (SomeMessage msg, dstate') <- recvMessage stok dstate
       go Zero (HasDState dstate') (k msg)
 
-    go n dstate (AwaitPipelined receiver k) = do
+    go n dstate (YieldPipelined refl msg receiver k) = do
       atomically (writeTQueue receiveQueue (ReceiveHandler dstate receiver))
+      sendMessage refl msg
       go (Succ n) NoDState k
 
     go (Succ n) NoDState (Collect Nothing k) = do
@@ -384,7 +385,7 @@ runPipelinedPeerReceiver Driver{recvMessage} = go
 -- thread performs every 'recvMessage' (so it owns @dstate@ outright), and the
 -- sender thread performs every 'sendMessage'. The two only ever touch opposite
 -- directions of the channel, and the 'AntiOutstanding' index guarantees that
--- the peer thread's own sends ('Yield2'\/'Done') happen only when the sender
+-- the peer thread's own sends ('Yield'\/'Done') happen only when the sender
 -- thread is idle.
 --
 runAntiPipelinedPeerWithDriver
@@ -443,7 +444,7 @@ runAntiPipelinedPeerMain sendVar doneVar
 
     -- Only reachable at 'AntiPipelined Z' (the constructor demands
     -- @AntiOutstanding ~ Z@), i.e. when the sender thread is provably idle.
-    go dstate (Yield2 refl msg k) = do
+    go dstate (Yield refl msg k) = do
       sendMessage refl msg
       go dstate k
 

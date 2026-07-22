@@ -76,12 +76,12 @@ connect = go
 
     go (Effect a )      b              = a >>= \a' -> go a' b
     go  a              (Effect b)      = b >>= \b' -> go a  b'
-    go (Yield2 _ msg a) (Await _ b)     = go  a     (b msg)
-    go (Await _ a)     (Yield2 _ msg b) = go (a msg) b
+    go (Yield _ msg a) (Await _ b)     = go  a     (b msg)
+    go (Await _ a)     (Yield _ msg b) = go (a msg) b
 
     -- By appealing to the proofs about agency for this protocol we can
     -- show that these other cases are impossible
-    go (Yield2 reflA _ _) (Yield2 reflB _ _) =
+    go (Yield reflA _ _) (Yield reflB _ _) =
       case exclusionLemma_ClientAndServerHaveAgency singPeerRole reflA reflB of
         ReflNobodyHasAgency -> case reflA of {}
 
@@ -89,7 +89,7 @@ connect = go
       case exclusionLemma_ClientAndServerHaveAgency singPeerRole reflA reflB of
         ReflNobodyHasAgency -> case reflA of {}
 
-    go (Done  reflA _) (Yield2 reflB _ _)   =
+    go (Done  reflA _) (Yield reflB _ _)   =
       case terminationLemma_2 singPeerRole reflB reflA of
         ReflNobodyHasAgency -> case reflB of {}
 
@@ -97,7 +97,7 @@ connect = go
       case terminationLemma_2 singPeerRole reflB reflA of
         ReflNobodyHasAgency -> case reflB of {}
 
-    go (Yield2 reflA _ _) (Done reflB _)    =
+    go (Yield reflA _ _) (Done reflB _)    =
       case terminationLemma_1 singPeerRole reflA reflB of
         ReflNobodyHasAgency -> case reflA of {}
 
@@ -162,9 +162,9 @@ forgetPipelined cs0 (PeerPipelined peer) = goSender EmptyQ cs0 peer
 
     goSender EmptyQ _cs (Done           refl     k) = Done refl k
     goSender q       cs (Effect                  k) = Effect (goSender q cs <$> k)
-    goSender q       cs (Yield2         refl m   k) = Yield2 refl m (goSender q cs k)
+    goSender q       cs (Yield          refl m   k) = Yield refl m (goSender q cs k)
     goSender q       cs (Await          refl     k) = Await refl   (goSender q cs <$> k)
-    goSender q       cs (AwaitPipelined      r   k) = goReceiver q cs k r
+    goSender q       cs (YieldPipelined refl m r k) = Yield refl m (goReceiver q cs k r)
     goSender q (True:cs')       (Collect (Just k) _) = goSender q cs' k
     goSender (ConsQ x q) (_:cs) (Collect _ k)        = goSender q cs (k x)
     goSender (ConsQ x q) cs@[]  (Collect _ k)        = goSender q cs (k x)
@@ -200,7 +200,7 @@ promoteToPipelined p = PeerPipelined (go p)
           Peer ps pr NonPipelined    st' m a
        -> Peer ps pr (Pipelined Z c) st' m a
     go (Effect k)         = Effect $ go <$> k
-    go (Yield2 refl msg k) = Yield2 refl msg (go k)
+    go (Yield refl msg k) = Yield refl msg (go k)
     go (Await refl k)     = Await refl (go . k)
     go (Done refl k)      = Done refl k
 
@@ -271,7 +271,7 @@ forgetAntiPipelined cs0 (PeerAntiPipelined (sender :: Sender ps pr apst apst' m)
            -> Peer ps pr 'NonPipelined                 st' m a
     goPeer cs (Effect               k) = Effect (goPeer cs <$> k)
     goPeer _  (Done  refl           k) = Done refl k
-    goPeer cs (Yield2 refl m         k) = Yield2 refl m (goPeer cs k)
+    goPeer cs (Yield refl m         k) = Yield refl m (goPeer cs k)
     goPeer cs (Await refl           k) = Await refl (goPeer cs . k)
     goPeer cs (YieldAntiPipelined   k) = goSender sender (goPeer cs k)
     goPeer (True:cs') (AntiCollect _ (Just k)) = goPeer cs' k
@@ -284,7 +284,7 @@ forgetAntiPipelined cs0 (PeerAntiPipelined (sender :: Sender ps pr apst apst' m)
              -> Peer   ps pr 'NonPipelined sst   m a
     goSender  SenderDone             k = k
     goSender (SenderEffect       ks) k = Effect ((`goSender` k) <$> ks)
-    goSender (SenderYield refl m ks) k = Yield2 refl m (goSender ks k)
+    goSender (SenderYield refl m ks) k = Yield refl m (goSender ks k)
 
 
 -- | Promote a peer to an anti-pipelined one, using an empty 'Sender'.
@@ -306,7 +306,7 @@ promoteToAntiPipelined p = PeerAntiPipelined SenderDone (go p)
           Peer ps pr 'NonPipelined            st' m a
        -> Peer ps pr ('AntiPipelined st st 'Z) st' m a
     go (Effect         k) = Effect (go <$> k)
-    go (Yield2 refl m   k) = Yield2 refl m (go k)
+    go (Yield refl m   k) = Yield refl m (go k)
     go (Await refl     k) = Await refl (go . k)
     go (Done  refl     k) = Done refl k
 

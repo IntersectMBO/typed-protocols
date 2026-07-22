@@ -75,6 +75,7 @@ pattern Yield :: forall ps pl st m a.
                  ( StateTokenI st
                  , StateTokenI st'
                  , StateAgency st ~ ClientAgency
+                 , Outstanding pl ~ Z
                  , AntiOutstanding pl ~ Z
                  )
               => Message ps st st'
@@ -82,7 +83,7 @@ pattern Yield :: forall ps pl st m a.
               -> Client ps pl st' m a
               -- ^ continuation
               -> Client ps pl st  m a
-pattern Yield msg k = TP.Yield2 ReflClientAgency msg k
+pattern Yield msg k = TP.Yield ReflClientAgency msg k
 
 
 -- | Client role pattern for 'TP.Await'
@@ -130,7 +131,7 @@ pattern YieldPipelined :: forall ps st n c m a.
                        -> Client ps (Pipelined (S n) c) st'' m a
                        -- ^ continuation
                        -> Client ps (Pipelined    n  c)  st   m a
-pattern YieldPipelined msg receiver k = TP.Yield2 ReflClientAgency msg (TP.AwaitPipelined receiver k)
+pattern YieldPipelined msg receiver k = TP.YieldPipelined ReflClientAgency msg receiver k
 
 
 -- | Client role pattern for 'TP.Collect'
