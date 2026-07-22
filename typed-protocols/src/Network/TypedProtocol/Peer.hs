@@ -116,7 +116,6 @@ data Peer ps pr pl st m a where
        ( StateTokenI st
        , StateTokenI st'
        , ActiveState st
-       , Outstanding pl ~ Z
        , AntiOutstanding pl ~ Z
        )
     => WeHaveAgencyProof pr st
@@ -184,24 +183,17 @@ data Peer ps pr pl st m a where
   -- Pipelining primitives
   --
 
-  -- | Pipelined send.  We statically decide from which state we continue (the
-  -- `st''` state here), the gap (between `st'` and `st''`) must be fulfilled
-  -- by 'Receiver' which runs will run in parallel.
+  -- | Reserve a pipelined receive: fork a 'Receiver' (run in parallel by the
+  -- driver) that consumes the transitions from the current state @st@ up to
+  -- @st'@, and continue from @st'@ with one more outstanding receiver.
   --
-  YieldPipelined
-    :: forall ps pr (st :: ps) (st' :: ps) c n st'' m a.
-       ( StateTokenI st
-       , StateTokenI st'
-       , ActiveState st
-       )
-    => WeHaveAgencyProof pr st
-    -- ^ agency proof
-    -> Message ps st st'
-    -- ^ protocol message
-    -> Receiver ps pr st' st'' m c
-    -- ^ receiver
-    -> Peer ps pr (Pipelined (S n) c) st'' m a
-    -- ^ continuation from state `st''`
+  AwaitPipelined
+    :: forall ps pr (st :: ps) c n (st' :: ps) m a.
+       StateTokenI st
+    => Receiver ps pr st st' m c
+    -- ^ receiver, starting from the current state
+    -> Peer ps pr (Pipelined (S n) c) st' m a
+    -- ^ continuation from state `st'`
     -> Peer ps pr (Pipelined    n  c)   st   m a
 
   -- | Collect results returned by a `Receiver`.  Results are collected in the
