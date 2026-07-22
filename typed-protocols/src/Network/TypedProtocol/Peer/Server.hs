@@ -188,7 +188,6 @@ pattern YieldAntiPipelined :: forall ps st st' n m a.
                               ()
                            => ( StateTokenI st
                               , StateTokenI st'
-                              , ActiveState st
                               )
                            => Server ps (AntiPipelined st st' (S n)) st' m a
                            -- ^ continuation, before or after sending

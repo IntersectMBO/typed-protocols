@@ -228,7 +228,6 @@ data Peer ps pr pl st m a where
     :: forall ps pr (st :: ps) n (st' :: ps) m a.
        ( StateTokenI st
        , StateTokenI st'
-       , ActiveState st
        )
     => Peer ps pr (AntiPipelined st st' (S n)) st' m a
        -- ^ continuation, before or after sending
