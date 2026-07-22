@@ -112,7 +112,7 @@ pattern Yield :: forall ps pl st m a.
               -> Server ps pl st' m a
               -- ^ continuation
               -> Server ps pl st  m a
-pattern Yield msg k = TP.Yield2 ReflServerAgency msg k
+pattern Yield msg k = TP.Yield ReflServerAgency msg k
 
 
 -- | Server role pattern for 'TP.Await'
@@ -160,7 +160,7 @@ pattern YieldPipelined :: forall ps st n c m a.
                        -> Server ps (Pipelined (S n) c) st'' m a
                        -- ^ continuation
                        -> Server ps (Pipelined    n  c)  st   m a
-pattern YieldPipelined msg receiver k = TP.Yield2 ReflServerAgency msg (TP.AwaitPipelined receiver k)
+pattern YieldPipelined msg receiver k = TP.Yield ReflServerAgency msg (TP.AwaitPipelined receiver k)
 
 
 -- | Server role pattern for 'TP.Collect'

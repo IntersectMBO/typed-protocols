@@ -55,7 +55,7 @@ removeState = go
       -> ST.Peer ps pr              st f m a
       ->    Peer ps pr NonPipelined st   m a
     go f (ST.Effect k) = Effect (go f <$> k)
-    go _ (ST.Yield refl _f f' msg k) = Yield2 refl msg (go f' k)
+    go _ (ST.Yield refl _f f' msg k) = Yield refl msg (go f' k)
     go f (ST.Await refl k) = Await refl $ \msg ->
       case k f msg of
         (k', f') -> go f' k'
