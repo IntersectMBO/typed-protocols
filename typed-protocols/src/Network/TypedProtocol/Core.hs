@@ -44,7 +44,7 @@ module Network.TypedProtocol.Core
   , IsPipelined (..)
     -- *** Outstanding
   , Outstanding
-  , AntiOutstanding
+  , DualOutstanding
     -- *** N and Nat
   , N (..)
   , Nat (Succ, Zero)
@@ -502,7 +502,7 @@ data IsPipelined ps where
 
     -- | Pipelined peer for a /server/ that only ever uses one
     -- 'Network.TypedProtocol.Peer.Sender'
-    AntiPipelined :: ps -> ps -> N -> IsPipelined ps
+    DualPipelined :: ps -> ps -> N -> IsPipelined ps
 
 -- | Type level count of the number of outstanding pipelined yields for which
 -- we have not yet collected a receiver result. Used to
@@ -515,13 +515,13 @@ type        Outstanding :: IsPipelined ps -> N
 type family Outstanding pl where
   Outstanding 'NonPipelined          = Z
   Outstanding ('Pipelined n _)       = n
-  Outstanding ('AntiPipelined _ _ _) = Z
+  Outstanding ('DualPipelined _ _ _) = Z
 
-type        AntiOutstanding :: IsPipelined ps -> N
-type family AntiOutstanding pl where
-  AntiOutstanding 'NonPipelined          = Z
-  AntiOutstanding ('Pipelined _ _)       = Z
-  AntiOutstanding ('AntiPipelined _ _ n) = n
+type        DualOutstanding :: IsPipelined ps -> N
+type family DualOutstanding pl where
+  DualOutstanding 'NonPipelined          = Z
+  DualOutstanding ('Pipelined _ _)       = Z
+  DualOutstanding ('DualPipelined _ _ n) = n
 
 -- | A value level inductive natural number, indexed by the corresponding type
 -- level natural number 'N'.

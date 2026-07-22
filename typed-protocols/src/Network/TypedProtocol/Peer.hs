@@ -5,7 +5,7 @@
 module Network.TypedProtocol.Peer
   ( Peer (..)
   , PeerPipelined (..)
-  , PeerAntiPipelined (..)
+  , PeerDualPipelined (..)
   , Receiver (..)
   , Sender (..)
   , Outstanding
@@ -117,7 +117,7 @@ data Peer ps pr pl st m a where
        , StateTokenI st'
        , ActiveState st
        , Outstanding pl ~ Z
-       , AntiOutstanding pl ~ Z
+       , DualOutstanding pl ~ Z
        )
     => WeHaveAgencyProof pr st
     -- ^ agency proof
@@ -172,7 +172,7 @@ data Peer ps pr pl st m a where
        ( StateTokenI st
        , StateAgency st ~ NobodyAgency
        , Outstanding pl ~ Z
-       , AntiOutstanding pl ~ Z
+       , DualOutstanding pl ~ Z
        )
     => NobodyHasAgencyProof pr st
     -- ^ (no) agency proof
@@ -218,31 +218,31 @@ data Peer ps pr pl st m a where
     -- ^ continuation
     -> Peer        ps pr (Pipelined (S n) c) st m a
 
-  -- | 'AntiPipelined' analog of 'YieldPipelined'
+  -- | 'DualPipelined' analog of 'YieldPipelined'
   --
   -- Always uses the 'Sender' that was provided to the driver alongside this
   -- 'Peer'. No agency proof is needed here: each message the 'Sender' actually
   -- sends is guarded by that 'Sender'\'s own 'SenderYield' proof, and a 'Sender'
   -- that sends nothing needs no agency.
-  YieldAntiPipelined
+  YieldDualPipelined
     :: forall ps pr (st :: ps) n (st' :: ps) m a.
        ( StateTokenI st
        , StateTokenI st'
        )
-    => Peer ps pr (AntiPipelined st st' (S n)) st' m a
+    => Peer ps pr (DualPipelined st st' (S n)) st' m a
        -- ^ continuation, before or after sending
-    -> Peer ps pr (AntiPipelined st st'  n ) st  m a
+    -> Peer ps pr (DualPipelined st st'  n ) st  m a
 
-  AntiCollect
+  DualCollect
     :: forall ps pr n st apst apst' m a.
        StateTokenI st
-    =>        Peer ps pr (AntiPipelined apst apst'   n ) st m a
+    =>        Peer ps pr (DualPipelined apst apst'   n ) st m a
        -- ^ how to proceed if/once the @n+1@st 'Sender' has already terminated
-    -> Maybe (Peer ps pr (AntiPipelined apst apst' (S n)) st m a)
+    -> Maybe (Peer ps pr (DualPipelined apst apst' (S n)) st m a)
        -- ^ 'Just' if and only if the peer can proceed before the @n+1@st 'Sender' has terminated
        --
        -- This is ignored if a message has already been sent
-    -> Peer ps pr (AntiPipelined apst apst' (S n)) st m a
+    -> Peer ps pr (DualPipelined apst apst' (S n)) st m a
 
 deriving instance Functor m => Functor (Peer ps pr pl st m)
 
@@ -289,7 +289,7 @@ data Receiver ps pr st stdone m c where
 
 deriving instance Functor m => Functor (Receiver ps pr st stdone m)
 
--- | 'AntiPipelined' analog of 'Receiver'
+-- | 'DualPipelined' analog of 'Receiver'
 type Sender :: forall ps
             -> PeerRole
             -> ps
@@ -324,10 +324,10 @@ data PeerPipelined ps pr (st :: ps) m a where
 
 deriving instance Functor m => Functor (PeerPipelined ps pr st m)
 
-data PeerAntiPipelined ps pr (st :: ps) m a where
-    PeerAntiPipelined ::
+data PeerDualPipelined ps pr (st :: ps) m a where
+    PeerDualPipelined ::
       Sender ps pr apst apst' m ->
-      Peer ps pr (AntiPipelined apst apst' Z) st m a ->
-      PeerAntiPipelined ps pr st m a
+      Peer ps pr (DualPipelined apst apst' Z) st m a ->
+      PeerDualPipelined ps pr st m a
 
-deriving instance Functor m => Functor (PeerAntiPipelined ps pr st m)
+deriving instance Functor m => Functor (PeerDualPipelined ps pr st m)

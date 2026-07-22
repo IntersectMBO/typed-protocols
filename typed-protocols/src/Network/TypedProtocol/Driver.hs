@@ -14,8 +14,8 @@ module Network.TypedProtocol.Driver
   , runPeerWithDriver
     -- * Pipelined peers
   , runPipelinedPeerWithDriver
-    -- * Anti-pipelined peers
-  , runAntiPipelinedPeerWithDriver
+    -- * Dual-pipelined peers
+  , runDualPipelinedPeerWithDriver
   ) where
 
 import Control.Monad (forever, join)
@@ -384,25 +384,25 @@ runPipelinedPeerReceiver Driver{recvMessage} = go
 -- Unlike the pipelined driver, there is no trailing-data handoff: the peer
 -- thread performs every 'recvMessage' (so it owns @dstate@ outright), and the
 -- sender thread performs every 'sendMessage'. The two only ever touch opposite
--- directions of the channel, and the 'AntiOutstanding' index guarantees that
+-- directions of the channel, and the 'DualOutstanding' index guarantees that
 -- the peer thread's own sends ('Yield'\/'Done') happen only when the sender
 -- thread is idle.
 --
-runAntiPipelinedPeerWithDriver
+runDualPipelinedPeerWithDriver
   :: forall ps (st :: ps) pr dstate m a.
      ( MonadAsync m
      , MonadEvaluate m
      , NFData a
      )
   => Driver ps pr dstate m
-  -> PeerAntiPipelined ps pr st m a
+  -> PeerDualPipelined ps pr st m a
   -> m (a, dstate)
-runAntiPipelinedPeerWithDriver driver@Driver{initialDState} (PeerAntiPipelined sender peer) = do
+runDualPipelinedPeerWithDriver driver@Driver{initialDState} (PeerDualPipelined sender peer) = do
     sendVar <- newTVarIO 0
     doneVar <- newTVarIO 0
-    r@(a, _dstate) <- runAntiPipelinedPeerSender sender sendVar doneVar driver
+    r@(a, _dstate) <- runDualPipelinedPeerSender sender sendVar doneVar driver
            `withAsyncLoop`
-         runAntiPipelinedPeerMain       sendVar doneVar driver peer initialDState
+         runDualPipelinedPeerMain       sendVar doneVar driver peer initialDState
 
     _ <- evaluate (force a)
     return r
@@ -417,7 +417,7 @@ runAntiPipelinedPeerWithDriver driver@Driver{initialDState} (PeerAntiPipelined s
         Right a -> return a
 
 
-runAntiPipelinedPeerMain
+runDualPipelinedPeerMain
   :: forall ps (apst :: ps) (apst' :: ps) (st :: ps) pr dstate m a.
      ( MonadSTM    m
      , MonadThread m
@@ -425,10 +425,10 @@ runAntiPipelinedPeerMain
   => TVar m Natural
   -> TVar m Natural
   -> Driver ps pr dstate m
-  -> Peer ps pr ('AntiPipelined apst apst' Z) st m a
+  -> Peer ps pr ('DualPipelined apst apst' Z) st m a
   -> dstate
   -> m (a, dstate)
-runAntiPipelinedPeerMain sendVar doneVar
+runDualPipelinedPeerMain sendVar doneVar
                          Driver{sendMessage, recvMessage}
                          peer0 dstate0 = do
     threadId <- myThreadId
@@ -437,27 +437,27 @@ runAntiPipelinedPeerMain sendVar doneVar
   where
     go :: forall st' n.
           dstate
-       -> Peer ps pr ('AntiPipelined apst apst' n) st' m a
+       -> Peer ps pr ('DualPipelined apst apst' n) st' m a
        -> m (a, dstate)
     go dstate (Effect k) = k >>= go dstate
     go dstate (Done _ x) = return (x, dstate)
 
-    -- Only reachable at 'AntiPipelined Z' (the constructor demands
-    -- @AntiOutstanding ~ Z@), i.e. when the sender thread is provably idle.
+    -- Only reachable at 'DualPipelined Z' (the constructor demands
+    -- @DualOutstanding ~ Z@), i.e. when the sender thread is provably idle.
     go dstate (Yield refl msg k) = do
       sendMessage refl msg
       go dstate k
 
-    -- Legal at any 'AntiOutstanding': receiving ahead is the whole point.
+    -- Legal at any 'DualOutstanding': receiving ahead is the whole point.
     go dstate (Await refl k) = do
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
 
-    go dstate (YieldAntiPipelined k) = do
+    go dstate (YieldDualPipelined k) = do
       atomically $ modifyTVar' sendVar (+ 1)
       go dstate k
 
-    go dstate (AntiCollect k mbNonBlocking) = do
+    go dstate (DualCollect k mbNonBlocking) = do
       join $ atomically $ do
         n <- readTVar doneVar
         if n > 0
@@ -466,7 +466,7 @@ runAntiPipelinedPeerMain sendVar doneVar
             Nothing -> retry
             Just k' -> pure $ go dstate k'
 
-runAntiPipelinedPeerSender
+runDualPipelinedPeerSender
   :: forall ps pr apst apst' dstate m.
      ( MonadSTM    m
      , MonadThread m
@@ -476,7 +476,7 @@ runAntiPipelinedPeerSender
   -> TVar m Natural
   -> Driver ps pr dstate m
   -> m Void
-runAntiPipelinedPeerSender sender sendVar doneVar
+runDualPipelinedPeerSender sender sendVar doneVar
                                 Driver{sendMessage} = do
 
     threadId <- myThreadId
