@@ -15,9 +15,14 @@ module Network.TypedProtocol.Driver.Simple
   , Role (..)
     -- * Pipelined peers
   , runPipelinedPeer
+    -- * Lookahead peers
+  , runLookaheadPeer
+  , runLookaheadFixedSenderPeer
     -- * Connected peers
   , runConnectedPeers
   , runConnectedPeersPipelined
+  , runConnectedPeersLookahead
+  , runConnectedPeersLookaheadFixedSender
   , runConnectedPeersAsymmetric
     -- * Driver utilities
     -- | This may be useful if you want to write your own driver.
@@ -169,6 +174,53 @@ runPipelinedPeer tracer codec channel peer =
     driver = driverSimple tracer codec channel
 
 
+-- | Run a lookahead 'Peer' with the given 'Channel' and 'Codec'.
+--
+-- Like pipelined peers, lookahead peers rely on concurrency (the 'Sender's run
+-- in parallel with the main peer), hence the 'MonadAsync' constraint.
+--
+runLookaheadPeer
+  :: forall ps (st :: ps) pr failure bytes m a.
+     ( MonadAsync m
+     , MonadEvaluate m
+     , MonadThrow m
+     , Exception failure
+     , NFData failure
+     , NFData a
+     )
+  => Tracer m (TraceSendRecv ps)
+  -> Codec ps failure m bytes
+  -> Channel m bytes
+  -> PeerLookahead ps pr st m a
+  -> m (a, Maybe bytes)
+runLookaheadPeer tracer codec channel peer =
+    runLookaheadPeerWithDriver driver peer
+  where
+    driver = driverSimple tracer codec channel
+
+
+-- | Run a fixed-'Sender' lookahead 'Peer' with the given 'Channel' and 'Codec'.
+--
+runLookaheadFixedSenderPeer
+  :: forall ps (st :: ps) pr failure bytes m a.
+     ( MonadAsync m
+     , MonadEvaluate m
+     , MonadThrow m
+     , Exception failure
+     , NFData failure
+     , NFData a
+     )
+  => Tracer m (TraceSendRecv ps)
+  -> Codec ps failure m bytes
+  -> Channel m bytes
+  -> PeerLookaheadFixedSender ps pr st m a
+  -> m (a, Maybe bytes)
+runLookaheadFixedSenderPeer tracer codec channel peer =
+    runLookaheadFixedSenderPeerWithDriver driver peer
+  where
+    driver = driverSimple tracer codec channel
+
+
 --
 -- Utils
 --
@@ -250,6 +302,65 @@ runConnectedPeersPipelined createChannels tracer codec client server =
     (fst <$> runPipelinedPeer tracerClient codec clientChannel client)
       `concurrently`
     (fst <$> runPeer          tracerServer codec serverChannel server)
+  where
+    tracerClient = contramap ((,) AsClient) tracer
+    tracerServer = contramap ((,) AsServer) tracer
+
+
+-- | Run a pipelined client against a lookahead server over a pair of connected
+-- 'Channel's. Both rely on concurrency — the client's receivers and the
+-- server's 'Sender's each run in parallel with their main thread — so this is
+-- where the interleavings lookahead exploits actually occur (unlike @connect@,
+-- which forgets them).
+--
+runConnectedPeersLookahead :: ( MonadAsync m
+                              , MonadCatch m
+                              , MonadEvaluate m
+                              , Exception failure
+                              , NFData failure
+                              , NFData a
+                              , NFData b
+                              )
+                           => m (Channel m bytes, Channel m bytes)
+                           -> Tracer m (PeerRole, TraceSendRecv ps)
+                           -> Codec ps failure m bytes
+                           -> PeerPipelined ps             pr  st m a
+                           -> PeerLookahead ps (FlipAgency pr) st m b
+                           -> m (a, b)
+runConnectedPeersLookahead createChannels tracer codec client server =
+    createChannels >>= \(clientChannel, serverChannel) ->
+
+    (fst <$> runPipelinedPeer tracerClient codec clientChannel client)
+      `concurrently`
+    (fst <$> runLookaheadPeer tracerServer codec serverChannel server)
+  where
+    tracerClient = contramap ((,) AsClient) tracer
+    tracerServer = contramap ((,) AsServer) tracer
+
+
+-- | As 'runConnectedPeersLookahead', but the server is a fixed-'Sender'
+-- lookahead peer run via 'runLookaheadFixedSenderPeer'.
+--
+runConnectedPeersLookaheadFixedSender :: ( MonadAsync m
+                                         , MonadCatch m
+                                         , MonadEvaluate m
+                                         , Exception failure
+                                         , NFData failure
+                                         , NFData a
+                                         , NFData b
+                                         )
+                                      => m (Channel m bytes, Channel m bytes)
+                                      -> Tracer m (PeerRole, TraceSendRecv ps)
+                                      -> Codec ps failure m bytes
+                                      -> PeerPipelined      ps             pr  st m a
+                                      -> PeerLookaheadFixedSender ps (FlipAgency pr) st m b
+                                      -> m (a, b)
+runConnectedPeersLookaheadFixedSender createChannels tracer codec client server =
+    createChannels >>= \(clientChannel, serverChannel) ->
+
+    (fst <$> runPipelinedPeer      tracerClient codec clientChannel client)
+      `concurrently`
+    (fst <$> runLookaheadFixedSenderPeer tracerServer codec serverChannel server)
   where
     tracerClient = contramap ((,) AsClient) tracer
     tracerServer = contramap ((,) AsServer) tracer

@@ -17,13 +17,17 @@ import Network.TypedProtocol.ReqResp.Examples
 import Network.TypedProtocol.ReqResp.Server
 import Network.TypedProtocol.ReqResp.Type
 
+import Control.Concurrent.Class.MonadSTM.TVar (newTVarIO, readTVar,
+                                               writeTVar)
 import Control.Exception (throw)
 import Control.Monad.Class.MonadAsync
 import Control.Monad.Class.MonadST
 import Control.Monad.Class.MonadSTM
+import Control.Monad.Class.MonadTest (MonadTest (exploreRaces))
 import Control.Monad.Class.MonadThrow
 import Control.Monad.IOSim
 import Control.Monad.ST (runST)
+import Control.Monad.Trans.State.Strict (State, runState, state)
 import Control.Tracer (nullTracer)
 
 import Data.Functor.Identity (Identity (..))
@@ -55,10 +59,16 @@ tests = testGroup "Network.TypedProtocol.ReqResp"
   , testProperty "directPipelined"     prop_directPipelined
   , testProperty "connect"             prop_connect
   , testProperty "connectPipelined"    prop_connectPipelined
+  , testProperty "connectLookahead"    prop_connectLookahead
   , testProperty "channel ST"          prop_channel_ST
   , testProperty "channel IO"          prop_channel_IO
   , testProperty "channelPipelined ST" prop_channelPipelined_ST
   , testProperty "channelPipelined IO" prop_channelPipelined_IO
+  , testProperty "channelLookahead ST"       prop_channelLookahead_ST
+  , testProperty "channelLookahead IO"       prop_channelLookahead_IO
+  , testProperty "channelLookahead IOSimPOR" prop_channelLookahead_IOSimPOR
+  , testProperty "lookaheadFixedEquiv ST"    prop_lookaheadFixedEquiv_ST
+  , testProperty "lookaheadFixedEquiv IO"    prop_lookaheadFixedEquiv_IO
 #if !defined(mingw32_HOST_OS)
   , testProperty "namedPipePipelined"  prop_namedPipePipelined_IO
   , testProperty "socketPipelined"     prop_socketPipelined_IO
@@ -168,6 +178,25 @@ prop_connectPipelined cs f xs =
            (s, c) == mapAccumL f 0 xs
 
 
+-- | The dual of 'prop_connectPipelined': a lookahead server (which ignores the
+-- request payload and reads each reply from the state) against a non-pipelined
+-- client. The result must not depend on the interleaving choices.
+--
+prop_connectLookahead :: [Bool] -> (Int -> (Int, Int)) -> NonNegative Int -> Bool
+prop_connectLookahead cs g (NonNegative n) =
+    case runState
+           (connectLookahead cs
+             (reqRespServerPeerLookahead nextResp)
+             (reqRespClientPeer (reqRespClientMap (replicate n ()))))
+           0
+
+      of ((_, resps, TerminalStates SingDone SingDone), acc) ->
+           (acc, resps) == mapAccumL (\a () -> g a) 0 (replicate n ())
+  where
+    nextResp :: State Int Int
+    nextResp = state (\a -> let (a', r) = g a in (r, a'))
+
+
 --
 -- Properties using channels, codecs and drivers.
 --
@@ -227,6 +256,129 @@ prop_channelPipelined_IO f xs =
 prop_channelPipelined_ST :: (Int -> Int -> (Int, Int)) -> [Int] -> Property
 prop_channelPipelined_ST f xs =
     let tr = runSimTrace (prop_channelPipelined f xs) in
+    counterexample (intercalate "\n" $ map show $ traceEvents tr)
+                 $ case traceResult True tr of
+                     Left  err -> throw err
+                     Right res -> res
+
+
+-- | The channel/driver sibling of 'prop_connectLookahead': a pipelined client
+-- against a lookahead server, run through the real 'runPipelinedPeer' /
+-- 'runLookaheadPeer' drivers over a channel. Unlike @connect@, this genuinely
+-- runs the 'Sender's concurrently with the main peer's receive-ahead, so the
+-- lookahead machinery is actually exercised. The collected replies must equal
+-- the reference sequence regardless of the interleaving the runtime picks.
+--
+prop_channelLookahead :: ( MonadLabelledSTM m
+                         , MonadAsync m
+                         , MonadCatch m
+                         , MonadEvaluate m
+                         , MonadST m
+                         , MonadTest m
+                         )
+                      => (Int -> (Int, Int)) -> NonNegative Int
+                      -> m Bool
+prop_channelLookahead g (NonNegative n) = do
+    -- mark all threads forked from here on as system threads, so IOSimPOR will
+    -- reverse races between the client's receivers and the server's 'Sender's
+    -- (a no-op under IO / plain IOSim)
+    exploreRaces
+    accVar <- newTVarIO 0
+    let nextResp = atomically $ do
+                     a <- readTVar accVar
+                     let (a', r) = g a
+                     writeTVar accVar a'
+                     return r
+        client   = reqRespClientPeerPipelined (reqRespClientMapPipelined (replicate n ()))
+        server   = reqRespServerPeerLookahead nextResp
+    (resps, ()) <- runConnectedPeersLookahead
+                     (createPipelineTestChannels 100)
+                     nullTracer
+                     CBOR.codecReqResp
+                     client server
+    return (resps == snd (mapAccumL (\a () -> g a) 0 (replicate n ())))
+
+prop_channelLookahead_IO :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelLookahead_IO g n =
+    ioProperty (prop_channelLookahead g n)
+
+prop_channelLookahead_ST :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelLookahead_ST g n =
+    let tr = runSimTrace (prop_channelLookahead g n) in
+    counterexample (intercalate "\n" $ map show $ traceEvents tr)
+                 $ case traceResult True tr of
+                     Left  err -> throw err
+                     Right res -> res
+
+-- | Have IOSimPOR systematically explore the interleavings of the client's
+-- receivers and the server's 'Sender's, checking that the lookahead driver
+-- produces the reference result under every schedule. The request count is kept
+-- small so the schedule space stays tractable.
+--
+prop_channelLookahead_IOSimPOR :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_channelLookahead_IOSimPOR g (NonNegative n) =
+    withMaxSuccess 20 $
+    exploreSimTrace id (prop_channelLookahead g (NonNegative (min n 6))) $ \_ tr ->
+      case traceResult False tr of
+        Left  failure -> counterexample (show failure) (property False)
+        Right res     -> property res
+
+
+-- | 'runLookaheadFixedSenderPeerWithDriver' and
+-- @'runLookaheadPeerWithDriver' . 'embedLookaheadUsingFixedSender'@ run the same
+-- fixed-'Sender' peer two different ways — the former tracking outstanding sends
+-- with a counter, the latter with a queue of (degenerate) 'Sender's. This runs
+-- a pipelined client against the same fixed server via each and checks both
+-- collect the same replies, matching the reference sequence.
+--
+prop_lookaheadFixedEquiv :: ( MonadLabelledSTM m
+                            , MonadAsync m
+                            , MonadCatch m
+                            , MonadEvaluate m
+                            , MonadST m
+                            )
+                         => (Int -> (Int, Int)) -> NonNegative Int
+                         -> m Bool
+prop_lookaheadFixedEquiv g (NonNegative n) = do
+    viaFixed <- runFixed
+    viaEmbed <- runEmbed
+    return (viaFixed == reference && viaEmbed == reference)
+  where
+    reqs      = replicate n ()
+    reference = snd (mapAccumL (\a () -> g a) 0 reqs)
+
+    client = reqRespClientPeerPipelined (reqRespClientMapPipelined reqs)
+
+    -- a fresh stateful reply source (so each run starts from the same state)
+    mkNextResp = do
+      accVar <- newTVarIO 0
+      return $ atomically $ do
+                 a <- readTVar accVar
+                 let (a', r) = g a
+                 writeTVar accVar a'
+                 return r
+
+    runFixed = do
+      nextResp <- mkNextResp
+      (resps, ()) <- runConnectedPeersLookaheadFixedSender
+                       (createPipelineTestChannels 100) nullTracer CBOR.codecReqResp
+                       client (reqRespServerPeerLookaheadFixedSender nextResp)
+      return resps
+
+    runEmbed = do
+      nextResp <- mkNextResp
+      (resps, ()) <- runConnectedPeersLookahead
+                       (createPipelineTestChannels 100) nullTracer CBOR.codecReqResp
+                       client (embedLookaheadUsingFixedSender (reqRespServerPeerLookaheadFixedSender nextResp))
+      return resps
+
+prop_lookaheadFixedEquiv_IO :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_lookaheadFixedEquiv_IO g n =
+    ioProperty (prop_lookaheadFixedEquiv g n)
+
+prop_lookaheadFixedEquiv_ST :: (Int -> (Int, Int)) -> NonNegative Int -> Property
+prop_lookaheadFixedEquiv_ST g n =
+    let tr = runSimTrace (prop_lookaheadFixedEquiv g n) in
     counterexample (intercalate "\n" $ map show $ traceEvents tr)
                  $ case traceResult True tr of
                      Left  err -> throw err

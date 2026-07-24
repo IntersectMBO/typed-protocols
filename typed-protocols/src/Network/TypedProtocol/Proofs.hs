@@ -12,11 +12,17 @@ module Network.TypedProtocol.Proofs
   ( -- * Connect proofs
     connect
   , connectPipelined
+  , connectLookahead
   , TerminalStates (..)
     -- * Pipelining proofs
     -- | Additional proofs specific to the pipelining features
   , forgetPipelined
   , promoteToPipelined
+    -- * Lookahead proofs
+    -- | Additional proofs specific to the lookahead features
+  , forgetLookahead
+  , promoteToLookahead
+  , embedLookaheadUsingFixedSender
     -- ** Pipeline proof helpers
   , Queue (..)
   , enqueue
@@ -224,6 +230,127 @@ connectPipelined
     -- ^ peers results and an evidence of their termination
 connectPipelined csA a b =
     connect (forgetPipelined csA a) b
+
+
+--
+-- Remove Lookahead
+--
+
+
+-- | Total conversion from lookahead peers to regular peers: the lookahead
+-- analogue of 'forgetPipelined'.
+--
+-- Where 'forgetPipelined' inlines each 'Receiver' at the point it is collected,
+-- this inlines the 'Sender' supplied at each 'AwaitLookahead': its sends, which
+-- the sender thread would have performed asynchronously, are performed
+-- synchronously just before the fused receive.
+--
+-- Dually to 'forgetPipelined', the @[Bool]@ chooses the interleaving at each
+-- 'FlushSender': a @True@ pretends the 'Sender' has not finished yet, so the
+-- peer takes its non-blocking continuation (when it has one) and leaves the
+-- send outstanding; a @False@ (or @[]@) flushes it.
+--
+forgetLookahead
+  :: forall ps (pr :: PeerRole) (st :: ps) m a.
+     Functor m
+  => [Bool]
+  -- ^ interleaving choices allowed by the 'FlushSender' primitive; @False@
+  -- values or @[]@ leave nothing outstanding.
+  -> PeerLookahead ps pr              st m a
+  -> Peer          ps pr NonPipelined st m a
+forgetLookahead cs0 (PeerLookahead peer0) =
+    goPeer cs0 peer0
+  where
+    goPeer :: forall st' n.
+              [Bool]
+           -> Peer ps pr ('Lookahead n VariableSender) st' m a
+           -> Peer ps pr 'NonPipelined                 st' m a
+    goPeer cs (Effect               k) = Effect (goPeer cs <$> k)
+    goPeer _  (Done  refl           k) = Done refl k
+    goPeer cs (Yield refl m         k) = Yield refl m (goPeer cs k)
+    goPeer cs (Await refl           k) = Await refl (goPeer cs . k)
+    goPeer cs (AwaitLookahead sender refl k) =
+        goSender sender (Await refl (goPeer cs . k))
+    goPeer (True:cs') (FlushSender (Just k) _) = goPeer cs' k
+    goPeer (_:cs)     (FlushSender _ k)        = goPeer cs  k
+    goPeer cs@[]      (FlushSender _ k)        = goPeer cs  k
+
+    goSender :: forall sst sst'.
+                Sender ps pr VariableSender sst sst' m
+             -> Peer   ps pr 'NonPipelined sst' m a
+             -> Peer   ps pr 'NonPipelined sst  m a
+    goSender  SenderDone             k = k
+    goSender (SenderEffect       ks) k = Effect ((`goSender` k) <$> ks)
+    goSender (SenderYield refl m ks) k = Yield refl m (goSender ks k)
+
+
+-- | Promote a peer to a lookahead one, using an empty 'Sender'.
+--
+-- This is a right inverse of 'forgetLookahead', e.g.
+--
+-- >>> forgetLookahead . promoteToLookahead = id
+--
+promoteToLookahead
+  :: forall ps (pr :: PeerRole) (st :: ps) m a.
+     Functor m
+  => Peer          ps pr NonPipelined st m a
+  -- ^ a peer
+  -> PeerLookahead ps pr              st m a
+  -- ^ a lookahead peer
+promoteToLookahead p = PeerLookahead (go p)
+  where
+    go :: forall st'.
+          Peer ps pr 'NonPipelined                  st' m a
+       -> Peer ps pr ('Lookahead 'Z VariableSender) st' m a
+    go (Effect         k) = Effect (go <$> k)
+    go (Yield refl m   k) = Yield refl m (go k)
+    go (Await refl     k) = Await refl (go . k)
+    go (Done  refl     k) = Done refl k
+
+
+-- | Embed a fixed-'Sender' lookahead peer as a variable-'Sender' one, by
+-- plugging the carried 'Sender' in for each 'TheSender'. This lets the
+-- 'PeerLookahead' machinery (proofs, driver) subsume 'PeerLookaheadFixedSender' —
+-- though a dedicated fixed driver is still preferable, as it can track
+-- outstanding sends with a counter rather than a queue.
+--
+embedLookaheadUsingFixedSender
+  :: forall ps (pr :: PeerRole) (st :: ps) m a.
+     Functor m
+  => PeerLookaheadFixedSender ps pr st m a
+  -> PeerLookahead            ps pr st m a
+embedLookaheadUsingFixedSender (PeerLookaheadFixedSender (sender :: Sender ps pr VariableSender apst apst' m) peer0) =
+    PeerLookahead (go peer0)
+  where
+    go :: forall st' n.
+          Peer ps pr ('Lookahead n (FixedSender apst apst')) st' m a
+       -> Peer ps pr ('Lookahead n VariableSender)           st' m a
+    go (Effect               k) = Effect (go <$> k)
+    go (Done  refl           k) = Done refl k
+    go (Yield refl m         k) = Yield refl m (go k)
+    go (Await refl           k) = Await refl (go . k)
+    go (AwaitLookahead TheSender refl k) =
+        AwaitLookahead sender refl (go . k)
+    go (FlushSender mk k)       = FlushSender (go <$> mk) (go k)
+
+
+-- | Analogous to 'connectPipelined' but for lookahead peers.
+--
+connectLookahead
+  :: forall ps (pr :: PeerRole)
+               (st :: ps) m a b.
+       (Monad m, SingI pr)
+    => [Bool]
+    -- ^ an interleaving
+    -> PeerLookahead ps             pr               st m a
+    -- ^ a lookahead peer
+    -> Peer          ps (FlipAgency pr) NonPipelined st m b
+    -- ^ a non-pipelined peer with flipped agency
+    -> m (a, b, TerminalStates ps)
+    -- ^ peers results and an evidence of their termination
+connectLookahead cs a b =
+    connect (forgetLookahead cs a) b
+
 
 -- | A reference specification for interleaving of requests and responses
 -- with pipelining, where the environment can choose whether a response is
