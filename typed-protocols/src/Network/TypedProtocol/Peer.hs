@@ -5,8 +5,12 @@
 module Network.TypedProtocol.Peer
   ( Peer (..)
   , PeerPipelined (..)
+  , PeerLookahead (..)
+  , PeerLookaheadFixedSender (..)
   , Receiver (..)
+  , Sender (..)
   , Outstanding
+  , OutstandingSenders
   , N (..)
   , Nat (Zero, Succ)
   , natToInt
@@ -79,7 +83,7 @@ import Network.TypedProtocol.Core as Core
 --
 type Peer :: forall ps
           -> PeerRole
-          -> IsPipelined
+          -> IsPipelined ps
           -> ps
           -> (Type -> Type)
           -- ^ monad's kind
@@ -115,6 +119,7 @@ data Peer ps pr pl st m a where
        , StateTokenI st'
        , ActiveState st
        , Outstanding pl ~ Z
+       , OutstandingSenders pl ~ Z
        )
     => WeHaveAgencyProof pr st
     -- ^ agency proof
@@ -146,6 +151,7 @@ data Peer ps pr pl st m a where
        ( StateTokenI st
        , ActiveState st
        , Outstanding pl ~ Z
+       , OutstandingSenders pl ~ Z
        )
     => TheyHaveAgencyProof pr st
     -- ^ agency proof
@@ -169,6 +175,7 @@ data Peer ps pr pl st m a where
        ( StateTokenI st
        , StateAgency st ~ NobodyAgency
        , Outstanding pl ~ Z
+       , OutstandingSenders pl ~ Z
        )
     => NobodyHasAgencyProof pr st
     -- ^ (no) agency proof
@@ -213,6 +220,38 @@ data Peer ps pr pl st m a where
     -> (c ->  Peer ps pr (Pipelined    n  c)  st m a)
     -- ^ continuation
     -> Peer        ps pr (Pipelined (S n) c) st m a
+
+  --
+  -- Lookahead primitives
+  --
+
+  -- | The dual of 'YieldPipelined'.  Defer the send @st -> st'@ to a background
+  -- 'Sender', then await ahead at @st'@.
+  --
+  AwaitLookahead
+    :: forall ps pr (sv :: SenderVariability ps) (st :: ps) (st' :: ps) n m a.
+       ( StateTokenI st
+       , StateTokenI st'
+       , ActiveState st
+       , ActiveState st'
+       )
+    => Sender ps pr sv st st' m
+    -> TheyHaveAgencyProof pr st'
+    -> (forall st''. Message ps st' st''
+        -> Peer ps pr (Lookahead (S n) sv) st'' m a)
+    -> Peer ps pr (Lookahead n sv) st m a
+
+  -- | The dual of 'Collect': await one deferred 'Sender' to finish.  Unlike
+  -- 'Collect', this can also be used at a terminal state (to drain before
+  -- 'Done'), so it does not require 'ActiveState'.
+  --
+  FlushSender
+    :: forall ps pr n (sv :: SenderVariability ps) st m a.
+       ( StateTokenI st
+       )
+    => Maybe (Peer ps pr (Lookahead (S n) sv) st m a)
+    ->       (Peer ps pr (Lookahead    n  sv) st m a)
+    ->        Peer ps pr (Lookahead (S n) sv) st m a
 
 deriving instance Functor m => Functor (Peer ps pr pl st m)
 
@@ -260,6 +299,32 @@ data Receiver ps pr st stdone m c where
 
 deriving instance Functor m => Functor (Receiver ps pr st stdone m)
 
+-- | The 'Lookahead' analog of 'Receiver'
+type Sender :: forall ps
+            -> PeerRole
+            -> SenderVariability ps
+            -> ps
+            -> ps
+            -> (Type -> Type)
+            -> Type
+data Sender ps pr sv st stdone m where
+
+  TheSender    :: Sender ps pr (FixedSender st stdone) st stdone m
+
+  SenderEffect :: m (Sender ps pr VariableSender st stdone m)
+               ->    Sender ps pr VariableSender st stdone m
+
+  SenderDone   :: Sender ps pr VariableSender stdone stdone m
+
+  SenderYield  :: ( StateTokenI st
+                  , StateTokenI st'
+                  , ActiveState st
+                  )
+               => !(WeHaveAgencyProof pr st)
+               -> Message ps st st'
+               -> Sender ps pr VariableSender st' stdone m
+               -> Sender ps pr VariableSender st  stdone m
+
 -- | A description of a peer that engages in a protocol in a pipelined fashion.
 --
 -- This type is useful for wrapping pipelined peers to hide information which
@@ -271,3 +336,29 @@ data PeerPipelined ps pr (st :: ps) m a where
                   -> PeerPipelined ps pr st m a
 
 deriving instance Functor m => Functor (PeerPipelined ps pr st m)
+
+-- | Wrapper for a lookahead peer that supplies its own 'Sender' at each
+-- 'AwaitLookahead'.  Expected by
+-- 'Network.TypedProtocol.Driver.runLookaheadPeerWithDriver'.
+--
+data PeerLookahead ps pr (st :: ps) m a where
+    PeerLookahead :: { runPeerLookahead :: Peer ps pr (Lookahead Z VariableSender) st m a }
+                  -> PeerLookahead ps pr st m a
+
+deriving instance Functor m => Functor (PeerLookahead ps pr st m)
+
+-- | Wrapper for a lookahead peer whose 'AwaitLookahead's all use 'TheSender',
+-- i.e. reuse the one 'Sender' carried here (with fixed endpoints @apst ->
+-- apst'@).  Expected by
+-- 'Network.TypedProtocol.Driver.runLookaheadFixedSenderPeerWithDriver', which
+-- can then track outstanding sends with a counter rather than a queue.
+--
+-- The carried 'Sender' is a 'VariableSender' — the concrete one the driver
+-- actually runs; the peer only refers to it abstractly via 'TheSender'.
+--
+data PeerLookaheadFixedSender ps pr (st :: ps) m a where
+    PeerLookaheadFixedSender :: Sender ps pr VariableSender apst apst' m
+                       -> Peer ps pr (Lookahead Z (FixedSender apst apst')) st m a
+                       -> PeerLookaheadFixedSender ps pr st m a
+
+deriving instance Functor m => Functor (PeerLookaheadFixedSender ps pr st m)

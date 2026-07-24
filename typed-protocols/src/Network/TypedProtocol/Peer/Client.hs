@@ -36,7 +36,7 @@ import Network.TypedProtocol.Peer qualified as TP
 
 
 type Client :: forall ps
-            -> IsPipelined
+            -> IsPipelined ps
             -> ps
             -> (Type -> Type)
             -> Type
@@ -76,6 +76,7 @@ pattern Yield :: forall ps pl st m a.
                  , StateTokenI st'
                  , StateAgency st ~ ClientAgency
                  , Outstanding pl ~ Z
+                 , OutstandingSenders pl ~ Z
                  )
               => Message ps st st'
               -- ^ protocol message
@@ -92,6 +93,7 @@ pattern Await :: forall ps pl st m a.
               => ( StateTokenI st
                  , StateAgency st ~ ServerAgency
                  , Outstanding pl ~ Z
+                 , OutstandingSenders pl ~ Z
                  )
               => (forall st'. Message ps st st'
                   -> Client ps pl st' m a)
@@ -107,6 +109,7 @@ pattern Done :: forall ps pl st m a.
              => ( StateTokenI st
                 , StateAgency st ~ NobodyAgency
                 , Outstanding pl ~ Z
+                , OutstandingSenders pl ~ Z
                 )
              => a
              -- ^ protocol return value
