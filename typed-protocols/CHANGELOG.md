@@ -7,6 +7,9 @@
 ### Non-breaking changes
 
 * Repository moved to https://github.com/IntersectMBO/typed-protocols
+* Added `Lookahead`, a dual of `Pipelined`: a peer defers its sends to
+  background `Sender`s and receives ahead (`AwaitLookahead` / `FlushSender`),
+  with supporting proofs, drivers, and `Server` pattern synonyms.
 
 ## 1.2.1.0 -- 2026-04-16
 
