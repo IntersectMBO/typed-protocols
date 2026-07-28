@@ -235,8 +235,8 @@ data Peer ps pr pl st m a where
        , ActiveState st
        , ActiveState st'
        )
-    => Sender ps pr sv st st' m
-    -> TheyHaveAgencyProof pr st'
+    => TheyHaveAgencyProof pr st'
+    -> Sender ps pr sv st st' m
     -> (forall st''. Message ps st' st''
         -> Peer ps pr (Lookahead (S n) sv) st'' m a)
     -> Peer ps pr (Lookahead n sv) st m a
@@ -358,7 +358,7 @@ deriving instance Functor m => Functor (PeerLookahead ps pr st m)
 --
 data PeerLookaheadFixedSender ps pr (st :: ps) m a where
     PeerLookaheadFixedSender :: Sender ps pr VariableSender apst apst' m
-                       -> Peer ps pr (Lookahead Z (FixedSender apst apst')) st m a
-                       -> PeerLookaheadFixedSender ps pr st m a
+                             -> Peer ps pr (Lookahead Z (FixedSender apst apst')) st m a
+                             -> PeerLookaheadFixedSender ps pr st m a
 
 deriving instance Functor m => Functor (PeerLookaheadFixedSender ps pr st m)

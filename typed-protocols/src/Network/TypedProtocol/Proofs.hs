@@ -269,7 +269,7 @@ forgetLookahead cs0 (PeerLookahead peer0) =
     goPeer _  (Done  refl           k) = Done refl k
     goPeer cs (Yield refl m         k) = Yield refl m (goPeer cs k)
     goPeer cs (Await refl           k) = Await refl (goPeer cs . k)
-    goPeer cs (AwaitLookahead sender refl k) =
+    goPeer cs (AwaitLookahead refl sender k) =
         goSender sender (Await refl (goPeer cs . k))
     goPeer (True:cs') (FlushSender (Just k) _) = goPeer cs' k
     goPeer (_:cs)     (FlushSender _ k)        = goPeer cs  k
@@ -329,8 +329,8 @@ embedLookaheadUsingFixedSender (PeerLookaheadFixedSender (sender :: Sender ps pr
     go (Done  refl           k) = Done refl k
     go (Yield refl m         k) = Yield refl m (go k)
     go (Await refl           k) = Await refl (go . k)
-    go (AwaitLookahead TheSender refl k) =
-        AwaitLookahead sender refl (go . k)
+    go (AwaitLookahead refl TheSender k) =
+        AwaitLookahead refl sender (go . k)
     go (FlushSender mk k)       = FlushSender (go <$> mk) (go k)
 
 

@@ -503,7 +503,7 @@ data IsPipelined ps where
     NonPipelined :: IsPipelined ps
 
     -- | The dual of 'Pipelined': defers sends to background 'Sender's while
-    -- receiving ahead. 'N' counts uncollected 'Sender's.
+    -- receiving ahead. 'N' counts unflushed 'Sender's.
     Lookahead    :: N -> SenderVariability ps -> IsPipelined ps
 
 -- | Whether each lookahead 'Sender' is supplied per-step or reused with fixed

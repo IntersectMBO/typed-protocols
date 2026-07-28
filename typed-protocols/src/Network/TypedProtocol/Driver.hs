@@ -436,7 +436,12 @@ runLookaheadPeerMain
   => (forall stA stZ. Sender ps pr sv stA stZ m -> STM m ())
   -- ^ register the 'Sender' deferred by an 'AwaitLookahead'
   -> TVar m Natural
-  -- ^ count of 'Sender's that have since finished, consumed by 'FlushSender'
+  -- ^ count of 'Sender's that have since finished, consumed by 'FlushSender'.
+  --
+  -- The role of this 'TVar' is the same as the queue of results in the
+  -- pipelining case, but since a 'Sender' doesn't return any result we just
+  -- count how many 'Sender's have finished: the sender increments it when it
+  -- finishes running, and 'FlushSender' decrements it.
   -> Driver ps pr dstate m
   -> Peer ps pr ('Lookahead Z sv) st m a
   -> dstate
@@ -466,7 +471,7 @@ runLookaheadPeerMain registerSender doneVar
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
 
-    go dstate (AwaitLookahead sender refl k) = do
+    go dstate (AwaitLookahead refl sender k) = do
       atomically (registerSender sender)
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)

@@ -75,6 +75,12 @@ pattern ServerPipelined { runServerPipelined } = TP.PeerPipelined runServerPipel
 {-# COMPLETE ServerPipelined #-}
 
 
+-- TODO: mirror these lookahead pattern synonyms in
+-- 'Network.TypedProtocol.Peer.Client' (a 'ClientLookahead' /
+-- 'ClientLookaheadFixedSender').  They are not strictly needed since the API is
+-- symmetric, but they would let a user work in terms of 'Client' as well as
+-- 'Server'.
+
 -- | A lookahead server that supplies its own 'Sender' at each 'AwaitLookahead'.
 --
 type ServerLookahead ps st m a = TP.PeerLookahead ps AsServer st m a
@@ -218,7 +224,7 @@ pattern AwaitLookahead :: forall ps sv st n m a.
                            -> Server ps (Lookahead (S n) sv) st'' m a)
                        -- ^ continuation, awaiting ahead at @st'@
                        -> Server ps (Lookahead n sv) st m a
-pattern AwaitLookahead sender k = TP.AwaitLookahead sender ReflClientAgency k
+pattern AwaitLookahead sender k = TP.AwaitLookahead ReflClientAgency sender k
 
 
 -- | Server role pattern for 'TP.FlushSender'
