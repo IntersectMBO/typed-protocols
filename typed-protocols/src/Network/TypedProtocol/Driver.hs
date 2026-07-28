@@ -13,14 +13,20 @@ module Network.TypedProtocol.Driver
   , runPeerWithDriver
     -- * Pipelined peers
   , runPipelinedPeerWithDriver
+    -- * Lookahead peers
+  , runLookaheadPeerWithDriver
+  , runLookaheadFixedSenderPeerWithDriver
   ) where
 
+import Control.Monad (forever, join)
 import Data.Void (Void)
+import Numeric.Natural (Natural)
 
 import Network.TypedProtocol.Core
 import Network.TypedProtocol.Peer
 
 import Control.Concurrent.Class.MonadSTM.TQueue
+import Control.Concurrent.Class.MonadSTM.TVar
 import Control.DeepSeq (NFData, force)
 import Control.Monad.Class.MonadAsync
 import Control.Monad.Class.MonadFork
@@ -363,3 +369,194 @@ runPipelinedPeerReceiver Driver{recvMessage} = go
     go dstate (ReceiverAwait refl k) = do
       (SomeMessage msg, dstate') <- recvMessage refl dstate
       go dstate' (k msg)
+
+
+--
+-- Running lookahead peers
+--
+
+-- | A 'Sender' whose states are hidden, so it can be queued.
+--
+data SomeSender ps pr m where
+     SomeSender :: Sender ps pr VariableSender st stdone m
+                -> SomeSender ps pr m
+
+-- | Run a lookahead peer with the given driver.
+--
+-- Dual to 'runPipelinedPeerWithDriver': where a pipelined peer sends ahead and
+-- defers its receives to a parallel receiver thread, a lookahead peer receives
+-- ahead and defers its sends to a parallel sender thread.
+--
+-- There is no trailing-data handoff: the peer thread performs every
+-- 'recvMessage' (so it owns @dstate@ outright), and the sender thread performs
+-- every 'sendMessage'. The two only ever touch opposite directions of the
+-- channel, and the 'OutstandingSenders' index guarantees the peer thread's own
+-- sends ('Yield'\/'Done') happen only when the sender thread is idle.
+--
+runLookaheadPeerWithDriver
+  :: forall ps (st :: ps) pr dstate m a.
+     ( MonadAsync m
+     , MonadEvaluate m
+     , NFData a
+     )
+  => Driver ps pr dstate m
+  -> PeerLookahead ps pr st m a
+  -> m (a, dstate)
+runLookaheadPeerWithDriver driver@Driver{initialDState} (PeerLookahead peer) = do
+    senderQueue <- atomically newTQueue
+    doneVar     <- newTVarIO 0
+    r@(a, _dstate) <- runLookaheadPeerSender (readTQueue senderQueue) doneVar driver
+           `withAsyncLoop`
+         runLookaheadPeerMain
+           (\sender -> writeTQueue senderQueue (SomeSender sender))
+           doneVar driver peer initialDState
+
+    _ <- evaluate (force a)
+    return r
+
+  where
+    withAsyncLoop :: m Void -> m x -> m x
+    withAsyncLoop left right = do
+      res <- race left right
+      case res of
+        Left v  -> case v of {}
+        Right a -> return a
+
+
+-- | The peer (main) thread shared by both lookahead drivers.  It differs only
+-- in how it hands off the 'Sender' deferred at each 'AwaitLookahead', which is
+-- the @registerSender@ argument: the variable driver enqueues it, the fixed
+-- driver bumps a counter (ignoring the abstract 'TheSender').
+--
+runLookaheadPeerMain
+  :: forall ps (sv :: SenderVariability ps) (st :: ps) pr dstate m a.
+     ( MonadSTM    m
+     , MonadThread m
+     )
+  => (forall stA stZ. Sender ps pr sv stA stZ m -> STM m ())
+  -- ^ register the 'Sender' deferred by an 'AwaitLookahead'
+  -> TVar m Natural
+  -- ^ count of 'Sender's that have since finished, consumed by 'FlushSender'.
+  --
+  -- The role of this 'TVar' is the same as the queue of results in the
+  -- pipelining case, but since a 'Sender' doesn't return any result we just
+  -- count how many 'Sender's have finished: the sender increments it when it
+  -- finishes running, and 'FlushSender' decrements it.
+  -> Driver ps pr dstate m
+  -> Peer ps pr ('Lookahead Z sv) st m a
+  -> dstate
+  -> m (a, dstate)
+runLookaheadPeerMain registerSender doneVar
+                     Driver{sendMessage, recvMessage}
+                     peer0 dstate0 = do
+    threadId <- myThreadId
+    labelThread threadId "lookahead-peer-main"
+    go dstate0 peer0
+  where
+    go :: forall st' n.
+          dstate
+       -> Peer ps pr ('Lookahead n sv) st' m a
+       -> m (a, dstate)
+    go dstate (Effect k) = k >>= go dstate
+    go dstate (Done _ x) = return (x, dstate)
+
+    -- Only reachable at 'Lookahead Z' (the constructor demands
+    -- @OutstandingSenders ~ Z@), i.e. when the sender thread is provably idle.
+    go dstate (Yield refl msg k) = do
+      sendMessage refl msg
+      go dstate k
+
+    -- Legal at any 'OutstandingSenders': receiving ahead is the whole point.
+    go dstate (Await refl k) = do
+      (SomeMessage msg, dstate') <- recvMessage refl dstate
+      go dstate' (k msg)
+
+    go dstate (AwaitLookahead refl sender k) = do
+      atomically (registerSender sender)
+      (SomeMessage msg, dstate') <- recvMessage refl dstate
+      go dstate' (k msg)
+
+    go dstate (FlushSender mbNonBlocking k) =
+      join $ atomically $ do
+        d <- readTVar doneVar
+        if d > 0
+          then do writeTVar doneVar (d - 1); pure (go dstate k)
+          else case mbNonBlocking of
+                 Nothing -> retry
+                 Just k' -> pure (go dstate k')
+
+
+-- | The sender thread shared by both lookahead drivers.  It differs only in
+-- how it obtains the next 'Sender' to run, which is the @nextSender@ argument:
+-- the variable driver reads one off a queue, the fixed driver waits for its
+-- counter and yields the one fixed 'Sender'.
+--
+runLookaheadPeerSender
+  :: forall ps pr dstate m.
+     ( MonadSTM    m
+     , MonadThread m
+     )
+  => STM m (SomeSender ps pr m)
+  -- ^ obtain the next 'Sender' to run (blocking until one is available)
+  -> TVar m Natural
+  -> Driver ps pr dstate m
+  -> m Void
+runLookaheadPeerSender nextSender doneVar
+                       Driver{sendMessage} = do
+    threadId <- myThreadId
+    labelThread threadId "lookahead-sender"
+    forever $ do
+      SomeSender sender <- atomically nextSender
+      runSender sender
+      atomically $ modifyTVar' doneVar (+ 1)
+  where
+    runSender :: forall stA stZ. Sender ps pr VariableSender stA stZ m -> m ()
+    runSender = \case
+      SenderEffect k          -> k >>= runSender
+      SenderDone              -> return ()
+      SenderYield  refl msg k -> do
+        sendMessage refl msg
+        runSender k
+
+
+-- | Run a fixed-'Sender' lookahead peer with the given driver.
+--
+-- Like 'runLookaheadPeerWithDriver', but every 'AwaitLookahead' reuses the one
+-- 'Sender' supplied here, so the driver tracks outstanding sends with a plain
+-- counter rather than a queue.  ('embedLookaheadUsingFixedSender' could instead
+-- reduce this to 'runLookaheadPeerWithDriver', but that would allocate and
+-- queue a redundant 'Sender' per step.)
+--
+runLookaheadFixedSenderPeerWithDriver
+  :: forall ps (st :: ps) pr dstate m a.
+     ( MonadAsync m
+     , MonadEvaluate m
+     , NFData a
+     )
+  => Driver ps pr dstate m
+  -> PeerLookaheadFixedSender ps pr st m a
+  -> m (a, dstate)
+runLookaheadFixedSenderPeerWithDriver driver@Driver{initialDState} (PeerLookaheadFixedSender sender peer) = do
+    sendVar <- newTVarIO (0 :: Natural)
+    doneVar <- newTVarIO 0
+    let -- wait for the counter, then yield the one fixed 'Sender'
+        nextSender = do n <- readTVar sendVar
+                        check (0 < n)
+                        writeTVar sendVar $! n - 1
+                        return (SomeSender sender)
+    r@(a, _dstate) <- runLookaheadPeerSender nextSender doneVar driver
+           `withAsyncLoop`
+         runLookaheadPeerMain
+           (\TheSender -> modifyTVar' sendVar (+ 1))
+           doneVar driver peer initialDState
+
+    _ <- evaluate (force a)
+    return r
+
+  where
+    withAsyncLoop :: m Void -> m x -> m x
+    withAsyncLoop left right = do
+      res <- race left right
+      case res of
+        Left v  -> case v of {}
+        Right a -> return a

@@ -42,8 +42,10 @@ module Network.TypedProtocol.Core
     -- ** Pipelining
     -- *** IsPipelined
   , IsPipelined (..)
+  , SenderVariability (..)
     -- *** Outstanding
   , Outstanding
+  , OutstandingSenders
     -- *** N and Nat
   , N (..)
   , Nat (Succ, Zero)
@@ -491,13 +493,25 @@ data N = Z | S N
 -- | Promoted data type which indicates if 'Peer' is used in
 -- pipelined mode or not.
 --
-data IsPipelined where
+type IsPipelined :: Type -> Type
+data IsPipelined ps where
     -- | Pipelined peer which is using `c :: Type` for collecting responses
     -- from a pipelined messages. 'N' indicates depth of pipelining.
-    Pipelined    :: N -> Type -> IsPipelined
+    Pipelined    :: N -> Type -> IsPipelined ps
 
     -- | Non-pipelined peer.
-    NonPipelined :: IsPipelined
+    NonPipelined :: IsPipelined ps
+
+    -- | The dual of 'Pipelined': defers sends to background 'Sender's while
+    -- receiving ahead. 'N' counts unflushed 'Sender's.
+    Lookahead    :: N -> SenderVariability ps -> IsPipelined ps
+
+-- | Whether each lookahead 'Sender' is supplied per-step or reused with fixed
+-- endpoints.
+type SenderVariability :: Type -> Type
+data SenderVariability ps where
+    VariableSender :: SenderVariability ps
+    FixedSender    :: ps -> ps -> SenderVariability ps
 
 -- | Type level count of the number of outstanding pipelined yields for which
 -- we have not yet collected a receiver result. Used to
@@ -505,11 +519,20 @@ data IsPipelined where
 -- collect (e.g. after 'YieldPipeliend' was used);
 -- and to ensure that the non-pipelined primitives 'Yield', 'Await' and 'Done'
 -- are only used when there are none unsatisfied pipelined requests.
---
-type        Outstanding :: IsPipelined -> N
+type        Outstanding :: IsPipelined ps -> N
 type family Outstanding pl where
   Outstanding 'NonPipelined    = Z
   Outstanding ('Pipelined n _) = n
+  Outstanding ('Lookahead _ _) = Z
+
+-- | Dual of 'Outstanding': count of outstanding 'Sender's; blocks 'Yield' and
+-- 'Done' (an inline send would race them).
+--
+type        OutstandingSenders :: IsPipelined ps -> N
+type family OutstandingSenders pl where
+  OutstandingSenders 'NonPipelined    = Z
+  OutstandingSenders ('Pipelined _ _) = Z
+  OutstandingSenders ('Lookahead n _) = n
 
 -- | A value level inductive natural number, indexed by the corresponding type
 -- level natural number 'N'.
