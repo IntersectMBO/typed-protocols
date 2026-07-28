@@ -17,8 +17,7 @@ import Network.TypedProtocol.ReqResp.Examples
 import Network.TypedProtocol.ReqResp.Server
 import Network.TypedProtocol.ReqResp.Type
 
-import Control.Concurrent.Class.MonadSTM.TVar (newTVarIO, readTVar,
-                                               writeTVar)
+import Control.Concurrent.Class.MonadSTM.TVar (newTVarIO, readTVar, writeTVar)
 import Control.Exception (throw)
 import Control.Monad.Class.MonadAsync
 import Control.Monad.Class.MonadST
