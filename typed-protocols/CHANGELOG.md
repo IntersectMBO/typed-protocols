@@ -10,6 +10,7 @@
 * Added `Lookahead`, a dual of `Pipelined`: a peer defers its sends to
   background `Sender`s and receives ahead (`AwaitLookahead` / `FlushSender`),
   with supporting proofs, drivers, and `Server` pattern synonyms.
+* Support `QuickCheck >= 2.18`, `io-classes-1.11`.
 
 ## 1.2.1.0 -- 2026-04-16
 
