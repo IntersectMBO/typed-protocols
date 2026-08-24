@@ -47,6 +47,11 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
 
 
+#if !MIN_VERSION_QuickCheck(2, 18, 0)
+withNumTests :: Testable prop => Int -> prop -> Property
+withNumTests = withMaxSuccess
+#endif
+
 --
 -- The list of all properties
 --
@@ -75,7 +80,7 @@ tests = testGroup "Network.TypedProtocol.PingPong"
     , testGroup "CBOR"
       [ testProperty "codec"           prop_codec_cbor_PingPong
       , testProperty "codec 2-splits"  prop_codec_cbor_splits2_PingPong
-      , testProperty "codec 3-splits"  $ withMaxSuccess 30 prop_codec_cbor_splits3_PingPong
+      , testProperty "codec 3-splits"  $ withNumTests 30 prop_codec_cbor_splits3_PingPong
       ]
     ]
   ]

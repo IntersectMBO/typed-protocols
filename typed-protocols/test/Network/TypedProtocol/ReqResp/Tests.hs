@@ -48,6 +48,11 @@ import Test.Tasty.QuickCheck (testProperty)
 import Text.Show.Functions ()
 
 
+#if !MIN_VERSION_QuickCheck(2, 18, 0)
+withNumTests :: Testable prop => Int -> prop -> Property
+withNumTests = withMaxSuccess
+#endif
+
 --
 -- The list of all properties
 --
@@ -75,11 +80,11 @@ tests = testGroup "Network.TypedProtocol.ReqResp"
   , testGroup "Codec"
     [ testProperty "codec"             prop_codec_ReqResp
     , testProperty "codec 2-splits"    prop_codec_splits2_ReqResp
-    , testProperty "codec 3-splits"    (withMaxSuccess 33 prop_codec_splits3_ReqResp)
+    , testProperty "codec 3-splits"    (withNumTests 33 prop_codec_splits3_ReqResp)
     , testGroup "CBOR"
       [ testProperty "codec"           prop_codec_cbor_ReqResp
       , testProperty "codec 2-splits"  prop_codec_cbor_splits2_ReqResp
-      , testProperty "codec 3-splits"  $ withMaxSuccess 30 prop_codec_cbor_splits3_ReqResp
+      , testProperty "codec 3-splits"  $ withNumTests 30 prop_codec_cbor_splits3_ReqResp
       ]
     ]
   , testGroup "AnnotatedCodec"
@@ -316,7 +321,7 @@ prop_channelLookahead_ST g n =
 --
 prop_channelLookahead_IOSimPOR :: (Int -> (Int, Int)) -> NonNegative Int -> Property
 prop_channelLookahead_IOSimPOR g (NonNegative n) =
-    withMaxSuccess 20 $
+    withNumTests 20 $
     exploreSimTrace id (prop_channelLookahead g (NonNegative (min n 6))) $ \_ tr ->
       case traceResult False tr of
         Left  failure -> counterexample (show failure) (property False)
