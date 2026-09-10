@@ -13,11 +13,10 @@ respond to and remediate such reports.
 
 ### Reporting a Vulnerability
 
-If you discover a security vulnerability in `typed-protocols`, we encourage you
-to responsibly disclose it to us. To report a vulnerability, please use the
-[private reporting form on
-GitHub](https://github.com/intersectmbo/typed-protocols/security/advisories/new)
-to draft a new _Security advisory_.
+If you discover a security vulnerability in `typed-protocols` or
+`typed-protocols-doc`, we encourage you to responsibly disclose it to us. To
+report a vulnerability, please use the [private reporting form on
+GitHub][security-form] to draft a new _Security advisory_.
 
 Please include as much details as needed to clearly qualify the issue:
 
@@ -89,8 +88,9 @@ report security vulnerabilities to us.
 
 ## Contact Information
 
-To report a security vulnerability, please use [GitHub
-form]((add project github form for your project)). Should you experience any issues reporting via GitHub or have other questions, Please contact [Security](security@intersectmbo.org).
+To report a security vulnerability, please use [GitHub form][security-form].
+Should you experience any issues reporting via GitHub or have other questions,
+Please contact [Security](security@intersectmbo.org).
 
 ## Revision of Policy
 
@@ -104,3 +104,5 @@ The typed-protocols project greatly appreciates the assistance of the security
 community in helping us maintain the security of our software while upholding
 the highest standards of privacy. Together, we can work to identify and address
 vulnerabilities, ensuring a safer and more secure experience for all users.
+
+[security-form]: https://github.com/intersectmbo/typed-protocols/security/advisories/new
